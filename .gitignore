@@ -1,0 +1,7 @@
+node_modules/
+dist/
+src-tauri/target/
+.idea/
+/img.png
+/img_1.png
+.DS_Store

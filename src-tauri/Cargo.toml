@@ -1,0 +1,36 @@
+[package]
+name = "serialpilot"
+version = "0.1.0"
+edition = "2021"
+default-run = "serialpilot"
+
+[lib]
+name = "serialpilot_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[[bin]]
+name = "serialpilot-mcp"
+path = "src/bin/serialpilot-mcp.rs"
+
+[[bin]]
+name = "serialpilot-mcp-http"
+path = "src/bin/serialpilot-mcp-http.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+async-trait = "0.1"
+axum = "0.8"
+base64 = "0.22"
+hex = "0.4"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "net"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
