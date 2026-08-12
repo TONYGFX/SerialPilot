@@ -1,4 +1,5 @@
 pub mod command;
+pub mod mcp;
 pub mod serial;
 
 use std::sync::Arc;

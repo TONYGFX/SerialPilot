@@ -6,6 +6,7 @@ SerialPilot is a cross-platform desktop AI serial assistant. The first slice run
 
 - `src-tauri/src/serial`: the only layer that owns serial adapters and the continuous receive loop.
 - `src-tauri/src/command.rs`: the single command/event contract. Tauri UI commands and MCP tool calls both call `SerialCore::execute`.
+- `src-tauri/src/mcp.rs`: the shared MCP tool catalogue, JSON-RPC handling, argument validation, and command decoding used by both transports.
 - `src-tauri/src/bin/serialpilot-mcp.rs`: a JSON-RPC MCP-compatible stdio server. Diagnostic output uses stderr only.
 - `src`: React UI. It receives `serial-event` notifications from the Rust core; it does not access serial devices.
 
@@ -47,13 +48,15 @@ cargo run --manifest-path src-tauri/Cargo.toml --bin serialpilot-mcp
 
 Send newline-delimited JSON-RPC requests on stdin. Protocol responses are written to stdout; logs are written only to stderr.
 
+The MCP tool catalogue includes `serial.list_ports`, `serial.open`, `serial.close`, `serial.configure`, `serial.status`, `serial.send`, `serial.send_file`, `serial.cancel_send_file`, `serial.read_since`, `serial.wait_for`, and `serial.exchange`. File transfer accepts `null`, `xmodem`, `xmodem-1k`, and `ymodem`; omitted chunk and interval values use bounded defaults.
+
 For MCP Streamable HTTP, which is the recommended remote transport for this project:
 
 ```bash
 cargo run --manifest-path src-tauri/Cargo.toml --bin serialpilot-mcp-http
 ```
 
-It listens on `http://127.0.0.1:3030/mcp` by default. Set `SERIALPILOT_MCP_ADDR=127.0.0.1:PORT` to change the bind address. The endpoint accepts JSON-RPC `initialize`, `tools/list`, and `tools/call` POST requests. SSE is deliberately not used in this slice: tool calls return synchronous structured results, while live UI updates remain a local Tauri event stream.
+It listens on `http://127.0.0.1:3030/mcp` by default. Set `SERIALPILOT_MCP_ADDR=127.0.0.1:PORT` to change the bind address. The endpoint accepts JSON-RPC `initialize`, `ping`, `tools/list`, and `tools/call` POST requests; `/health` provides a simple local liveness check. SSE is deliberately not used in this slice: tool calls return synchronous structured results, while live UI updates remain a local Tauri event stream.
 
 ## First-slice limitation
 

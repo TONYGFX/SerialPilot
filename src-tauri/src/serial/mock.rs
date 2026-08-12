@@ -46,17 +46,34 @@ impl SerialAdapter for MockSerialAdapter {
         let (incoming_tx, incoming) = mpsc::channel::<Vec<u8>>(64);
         let handshake_tx = incoming_tx.clone();
         tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(20)).await;
+            // Keep the protocol handshake outside the normal send/read test window.
+            tokio::time::sleep(Duration::from_millis(80)).await;
             let _ = handshake_tx.send(vec![0x43]).await;
         });
         let sample_tx = incoming_tx.clone();
         tokio::spawn(async move {
+            let mut ymodem_header_seen = false;
             while let Some(payload) = writes.recv().await {
                 tokio::time::sleep(Duration::from_millis(8)).await;
-                let mut response = if matches!(payload.first(), Some(0x01 | 0x02)) || payload == [0x04] { vec![0x06] } else { vec![0xaa, 0x55] };
-                if response[0] == 0xaa { response.extend(payload); }
+                let is_packet = matches!(payload.first(), Some(0x01 | 0x02));
+                let is_ymodem_header = is_packet && payload.get(1) == Some(&0);
+                let mut response = if is_packet || payload == [0x04] {
+                    vec![0x06]
+                } else {
+                    vec![0xaa, 0x55]
+                };
+                if response[0] == 0xaa {
+                    response.extend(payload);
+                }
                 if incoming_tx.send(response).await.is_err() {
                     break;
+                }
+                if is_ymodem_header && !ymodem_header_seen {
+                    ymodem_header_seen = true;
+                    tokio::time::sleep(Duration::from_millis(2)).await;
+                    if incoming_tx.send(vec![0x43]).await.is_err() {
+                        break;
+                    }
                 }
             }
         });
