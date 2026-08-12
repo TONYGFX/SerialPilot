@@ -57,7 +57,7 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
   const [dragging, setDragging] = useState(false);
   const drag = useRef<{ startX: number; startY: number; originX: number; originY: number }>();
   const visibleSamples = useVisibleSamples(samples, channels, settings.samplesPerChannel);
-  const viewport = useMeasuredViewport(plot, visibleSamples.length, settings.samplesPerChannel, channels.length);
+  const viewport = useMeasuredViewport(plot, settings.samplesPerChannel, channels.length);
   const chart = useMemo(() => buildWaveChart(visibleSamples, channels, { width: viewport.contentWidth, height: viewport.contentHeight }), [visibleSamples, channels, viewport.contentWidth, viewport.contentHeight]);
   const panBounds = useMemo(() => ({
     x: Math.max(0, chart.viewportWidth - viewport.width),
@@ -253,25 +253,26 @@ function useVisibleSamples(samples: WaveSample[], channels: WaveChannel[], sampl
   }, [channels, samples, samplesPerChannel]);
 }
 
-function useMeasuredViewport(plot: RefObject<HTMLDivElement>, sampleCount: number, samplesPerChannel: number, channelCount: number) {
+function useMeasuredViewport(plot: RefObject<HTMLDivElement>, samplesPerChannel: number, channelCount: number) {
   const [viewport, setViewport] = useState({ width: 900, height: 500, contentWidth: 1000, contentHeight: 560 });
   useEffect(() => {
     const element = plot.current;
     if (!element) return;
-    const update = () => setViewportFromElement(element, setViewport, sampleCount, samplesPerChannel, channelCount);
+    const update = () => setViewportFromElement(element, setViewport, samplesPerChannel, channelCount);
     update();
     const observer = new ResizeObserver(update);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [plot, sampleCount, samplesPerChannel, channelCount]);
+  }, [plot, samplesPerChannel, channelCount]);
   return viewport;
 }
 
-function setViewportFromElement(element: HTMLDivElement, setViewport: Dispatch<SetStateAction<{ width: number; height: number; contentWidth: number; contentHeight: number }>>, sampleCount: number, samplesPerChannel: number, channelCount: number) {
+function setViewportFromElement(element: HTMLDivElement, setViewport: Dispatch<SetStateAction<{ width: number; height: number; contentWidth: number; contentHeight: number }>>, samplesPerChannel: number, channelCount: number) {
   const bounds = element.getBoundingClientRect();
   const width = Math.max(1, Math.round(bounds.width) - WAVE_AXIS_WIDTH);
   const height = Math.max(1, Math.round(bounds.height) - WAVE_TOOLBAR_HEIGHT);
-  const contentWidth = Math.max(width, 900, samplesPerChannel * 4 + 120, sampleCount * 4 + 120);
+  // Samples from separate channels share one arrival timeline; they must not widen it repeatedly.
+  const contentWidth = Math.max(width, 900, samplesPerChannel * 4 + 120);
   const contentHeight = Math.max(height, 560, channelCount * 70 + 420);
   const next = { width, height, contentWidth, contentHeight };
   setViewport((current) => current.width === next.width && current.height === next.height && current.contentWidth === next.contentWidth && current.contentHeight === next.contentHeight ? current : next);
