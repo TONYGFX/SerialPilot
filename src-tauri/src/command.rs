@@ -909,12 +909,11 @@ async fn stream_file(
     };
     let mut sent_bytes = 0u64;
     let mut buffer = vec![0u8; chunk_size];
-    let mut cursor = state.lock().await.next_cursor.saturating_sub(1);
+    let cursor = state.lock().await.next_cursor.saturating_sub(1);
     if protocol != FileTransferProtocol::Null {
         if wait_for_control(state, changed, cursor, timeout_ms, &[0x15, 0x43]).await.is_none() {
             return Err((0, false));
         }
-        cursor = state.lock().await.next_cursor.saturating_sub(1);
         if protocol == FileTransferProtocol::Ymodem {
             let mut header = vec![0u8; 128];
             let name = file_path.rsplit(['/', '\\']).next().unwrap_or("file.bin");
@@ -924,7 +923,8 @@ async fn stream_file(
             let before = state.lock().await.next_cursor.saturating_sub(1);
             send_wire(&frame, outgoing.clone(), state, events, audit, changed, timeout_ms).await?;
             if wait_for_control(state, changed, before, timeout_ms, &[0x06]).await.is_none() { return Err((0, false)); }
-            cursor = state.lock().await.next_cursor.saturating_sub(1);
+            let after_header = state.lock().await.next_cursor.saturating_sub(1);
+            if wait_for_control(state, changed, after_header, timeout_ms, &[0x43]).await.is_none() { return Err((0, false)); }
         }
     }
     let mut sequence = 1u8;
@@ -1007,13 +1007,14 @@ async fn wait_for_control(state: &Arc<Mutex<State>>, changed: &Arc<Notify>, afte
     let mut cursor = after_cursor;
     loop {
         let snapshot = state.lock().await;
-        for frame in snapshot.frames.iter().filter(|frame| frame.cursor > cursor && frame.direction == Direction::Rx) {
+        let frames: Vec<_> = snapshot.frames.iter().filter(|frame| frame.cursor > cursor && frame.direction == Direction::Rx).cloned().collect();
+        drop(snapshot);
+        for frame in frames {
             if let Ok(bytes) = BASE64.decode(&frame.raw_base64) {
                 if bytes.len() == 1 && accepted.contains(&bytes[0]) { return Some(bytes[0]); }
             }
             cursor = frame.cursor;
         }
-        drop(snapshot);
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         if remaining.is_zero() { return None; }
         if timeout(remaining, changed.notified()).await.is_err() { return None; }
