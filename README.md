@@ -1,67 +1,110 @@
 # SerialPilot
 
-SerialPilot is a cross-platform desktop AI serial assistant. The first slice runs entirely against a clearly labelled **Mock serial adapter**, so it can be developed and tested without a physical device.
+SerialPilot 是一个跨平台桌面端 AI 串口助手。它使用 Tauri 2、React、TypeScript 和 Rust 构建，串口核心、UI 和 MCP 共享同一套结构化命令与事件路径。
 
-## Architecture
+> 当前发布版使用明确标注的 Mock 串口适配器进行演示和开发，尚未接入真实物理串口驱动。
 
-- `src-tauri/src/serial`: the only layer that owns serial adapters and the continuous receive loop.
-- `src-tauri/src/command.rs`: the single command/event contract. Tauri UI commands and MCP tool calls both call `SerialCore::execute`.
-- `src-tauri/src/mcp.rs`: the shared MCP tool catalogue, JSON-RPC handling, argument validation, and command decoding used by both transports.
-- `src-tauri/src/bin/serialpilot-mcp.rs`: a JSON-RPC MCP-compatible stdio server. Diagnostic output uses stderr only.
-- `src`: React UI. It receives `serial-event` notifications from the Rust core; it does not access serial devices.
+## 功能
 
-The receive loop starts as part of `serial.open`, appends immutable raw-byte frames to a bounded buffer, and continues independently of reads. `read_since`, `wait_for`, and `exchange` read that buffer by cursor. `exchange` captures the cursor before sending, so a fast response cannot arrive before its wait begins.
+- 桌面端串口工作区：端口、波特率、数据位、校验位、停止位和流控配置。
+- 文本、HEX、Base64 发送，以及文件发送进度和取消。
+- TX/RX 实时日志，支持暂停、清空、显示格式切换和接收数据保存。
+- 后台接收任务、游标读取、固定容量 RX 缓冲和丢弃帧提示。
+- 有界的 `wait_for`、`exchange`、批量发送和批量事务操作。
+- 多通道波形：自定义通道名称和颜色，悬浮查看采样值，拖拽/滚轮平移，`Ctrl + 滚轮` 缩放横轴，一键跟随最新数据。
+- MCP 工具：串口控制和波形通道控制均经过 Rust 串口核心，不绕过核心访问硬件。
+- MCP stdio 和 Streamable HTTP 两种独立服务；桌面程序内置 HTTP 服务开关。
+- 深色和浅色桌面主题。
 
-The first slice keeps a maximum 64 KiB unified session buffer for TX/RX frames. When the limit is exceeded, the oldest frames are evicted automatically and counted in `dropped_frames`; readers whose cursor falls behind receive an explicit `cursor_expired`/`dropped` result instead of silently losing data. The UI shows current buffer usage against its limit.
+## 架构边界
 
-File sending uses the same command path as text and HEX sending. The desktop UI opens a native file picker, then sends the selected file as bounded raw-byte chunks with configurable chunk size and inter-chunk delay. Each chunk is recorded as a TX frame and a `file_progress` event updates the progress bar; an active transfer can be cancelled with `serial.cancel_send_file`. The file is streamed by Rust and is never loaded in full by React.
+```text
+React UI ─┐
+MCP      ─┼─> 统一 Command/Event ─> Rust SerialCore ─> SerialAdapter
+审计记录 ─┘
+```
 
-Each command and frame creates one structured `SerialEvent`. The event is emitted to Tauri for UI subscription and retained in a bounded in-memory session audit in this first slice. Durable SQLite session storage is the next persistence increment; it is deliberately not pretended to exist yet.
+- 前端不直接访问物理串口。
+- MCP 不绕过串口核心。
+- 只有 Rust 串口适配器可以访问串口设备。
+- 串口打开后，后台读取任务持续运行；`read_since`、`wait_for` 和 `exchange` 都从接收缓冲区读取。
+- 原始字节、文本显示和波形解析结果分开保存，解析不会覆盖原始数据。
+- stdio MCP 的日志只写入 stderr，不污染 stdout 协议流。
 
-## Waveform Workspace
+## 快速开始
 
-The waveform tab derives display-only numeric samples from RX text frames while leaving the core's raw bytes unchanged. It does not auto-detect or invent channels: users add each channel explicitly with a name, line color, and enabled state. RX frames use case-sensitive named pairs, such as `X1=100,X2=200\r\n`; the parser maps a value only when its name exactly matches a configured channel.
+### 开发环境
 
-The toolbar can pause only waveform display, clear only waveform history, configure channel mappings, choose the per-channel display window, and turn latest-point markers on or off. A changed channel configuration clears derived samples so data captured under two different mappings never mixes. Mock emits a deterministic 12-frame `X1=100,X2=200,X3=24\r\n`-style sequence every 250 ms so the configured channels visibly move while testing.
-
-## Run
-
-After installing the prerequisites (Node 20+ and Rust stable with Tauri 2 system dependencies):
+需要 Node.js 20+、Rust stable、Cargo 和 Tauri 2 在 Windows 上所需的 WebView2/构建依赖。
 
 ```bash
 npm install
 npm run tauri dev
 ```
 
-Core verification:
+前端单独运行：
 
 ```bash
+npm run dev
+```
+
+### 验证
+
+```bash
+npm run build
+npm test -- --run
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-Use the `MCP` status button in the desktop title bar to open MCP settings. Its gray/green status dot shows whether the loopback-only HTTP service is stopped or running. The service lives inside the desktop process; its tool calls use the same serial core, current session, RX buffer, and event stream as the UI.
+## MCP
 
-For a standalone MCP process using the Mock adapter:
+桌面窗口右上角的 MCP 状态按钮用于启动和停止内置 HTTP 服务。独立服务可使用：
 
 ```bash
 cargo run --manifest-path src-tauri/Cargo.toml --bin serialpilot-mcp
-```
-
-Send newline-delimited JSON-RPC requests on stdin. Protocol responses are written to stdout; logs are written only to stderr.
-
-The MCP tool catalogue includes the core serial tools plus bounded automation tools: `serial.send_batch`, `serial.exchange_batch`, `serial.wait_for_any`, `serial.monitor_ports`, and `serial.reconnect`. Waveform tools are `waveform.list_channels`, `waveform.add_channel`, `waveform.update_channel`, `waveform.remove_channel`, and `waveform.clear_samples`. File transfer accepts `null`, `xmodem`, `xmodem-1k`, and `ymodem`; batch sizes, monitor duration, and wait timeouts are bounded by the Rust core.
-
-Waveform channel tools update the same channel state used by the desktop waveform view. Channel names such as `X1`, `X2`, and `X3` are matched against named RX values; clearing waveform samples only clears the derived display projection and never deletes raw RX frames.
-
-For MCP Streamable HTTP, which is the recommended remote transport for this project:
-
-```bash
 cargo run --manifest-path src-tauri/Cargo.toml --bin serialpilot-mcp-http
 ```
 
-It listens on `http://127.0.0.1:3030/mcp` by default. Set `SERIALPILOT_MCP_ADDR=127.0.0.1:PORT` to change the bind address. The endpoint accepts JSON-RPC `initialize`, `ping`, `tools/list`, and `tools/call` POST requests; `/health` provides a simple local liveness check. SSE is deliberately not used in this slice: tool calls return synchronous structured results, while live UI updates remain a local Tauri event stream.
+HTTP 服务默认监听 `http://127.0.0.1:3030/mcp`，可通过 `SERIALPILOT_MCP_ADDR=127.0.0.1:PORT` 修改地址。当前 HTTP 实现使用 Streamable HTTP，不使用 SSE；SSE/实时界面更新由桌面端本地事件流承担。
 
-## First-slice limitation
+核心工具包括：
 
-The included adapter is intentionally Mock-only. It echoes each outbound payload after a short delay, prefixed by `aa55`. A future `SerialAdapter` implementation can use a cross-platform physical serial crate without changing UI or MCP command paths.
+- `serial.list_ports`、`serial.open`、`serial.status`、`serial.send`
+- `serial.read_since`、`serial.wait_for`、`serial.exchange`
+- `serial.send_batch`、`serial.exchange_batch`、`serial.wait_for_any`
+- `serial.monitor_ports`、`serial.reconnect`
+- `waveform.list_channels`、`waveform.add_channel`、`waveform.update_channel`
+- `waveform.remove_channel`、`waveform.clear_samples`
+
+## Windows 发布版
+
+普通用户只需要桌面程序：
+
+```text
+src-tauri/target/release/serialpilot.exe
+```
+
+`serialpilot-mcp.exe` 是 MCP stdio 服务，`serialpilot-mcp-http.exe` 是独立 MCP HTTP 服务；它们不是桌面 UI，只有需要独立 MCP 进程时才使用。
+
+当前发布版本：`0.1.0`
+
+## Mock 数据
+
+Mock 适配器会持续生成带名称的数值帧，例如：
+
+```text
+X1=100,X2=200,X3=24\r\n
+```
+
+因此可以在没有硬件的情况下测试发送、接收、游标、MCP 和波形功能。替换为真实跨平台串口适配器时，不需要改变 UI 或 MCP 命令路径。
+
+## 已知限制
+
+- 当前没有真实物理串口适配器。
+- 本地会话审计暂存于内存，尚未接入 SQLite 持久化。
+- 安装包生成依赖 Windows WiX/NSIS 工具链；没有安装工具时可直接运行 Release EXE。
+
+## 许可证
+
+项目许可证尚未确定。

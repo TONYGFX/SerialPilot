@@ -1,6 +1,13 @@
 node_modules/
 dist/
 src-tauri/target/
+coverage/
+.cache/
+.turbo/
+.env
+.env.*
+!.env.example
+*.log
 .idea/
 /img.png
 /img_1.png
