@@ -368,6 +368,7 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .wave-axis-content { position: absolute; top: 0; left: 0; will-change: transform; }
 .wave-axis-svg { display: block; overflow: visible; }
 .wave-viewport { position: relative; min-width: 0; min-height: 0; overflow: hidden; touch-action: none; cursor: grab; }
+.wave-viewport:focus { outline: 1px solid rgb(80 185 119 / 65%); outline-offset: -1px; }
 .wave-viewport.dragging { cursor: grabbing; }
 .wave-pan-layer { position: absolute; top: 0; left: 0; will-change: transform; }
 .wave-svg { display: block; width: 100%; height: 100%; min-height: 0; cursor: inherit; }
@@ -469,6 +470,7 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .app-shell[data-theme="light"] .receive-display-picker button:hover, .app-shell[data-theme="light"] .receive-display-picker button.selected { background: #e7f5eb; color: #1e7044; }
 .app-shell[data-theme="light"] .wave-plot { background: #f8fbfb; }
 .app-shell[data-theme="light"] .wave-axis { border-color: #b9c7cb; background: #f8fbfb; }
+.app-shell[data-theme="light"] .wave-viewport:focus { outline-color: rgb(45 133 81 / 58%); }
 .app-shell[data-theme="light"] .wave-hover { border-color: #9db9a6; background: rgb(255 255 255 / 96%); color: #405a62; box-shadow: 0 6px 18px rgb(36 56 63 / 17%); }
 .app-shell[data-theme="light"] .wave-frame { fill: #fbfdfd; stroke: #b9c7cb; }
 .app-shell[data-theme="light"] .wave-grid { stroke: #aebfc3; }

@@ -40,6 +40,8 @@ const DEFAULT_SETTINGS: WaveformSettings = {
 const CHANNEL_COLORS = ["#61d792", "#5fc7dd", "#e8ba61", "#df7aa4", "#a8a6ee", "#d9935d"];
 const WAVE_AXIS_WIDTH = 58;
 const WAVE_TOOLBAR_HEIGHT = 54;
+const MIN_HORIZONTAL_ZOOM = 0.25;
+const MAX_HORIZONTAL_ZOOM = 4;
 
 /**
  * Draws configured channels using an aspect-correct SVG viewport.
@@ -55,9 +57,11 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
   const [openMenu, setOpenMenu] = useState<OpenMenu>();
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
+  const [horizontalZoom, setHorizontalZoom] = useState(1);
   const drag = useRef<{ startX: number; startY: number; originX: number; originY: number }>();
-  const visibleSamples = useVisibleSamples(samples, channels, settings.samplesPerChannel);
-  const viewport = useMeasuredViewport(plot, settings.samplesPerChannel, channels.length);
+  const visibleSampleLimit = getVisibleSampleLimit(settings.samplesPerChannel, horizontalZoom);
+  const visibleSamples = useVisibleSamples(samples, channels, visibleSampleLimit);
+  const viewport = useMeasuredViewport(plot, settings.samplesPerChannel, horizontalZoom, channels.length);
   const chart = useMemo(() => buildWaveChart(visibleSamples, channels, { width: viewport.contentWidth, height: viewport.contentHeight }), [visibleSamples, channels, viewport.contentWidth, viewport.contentHeight]);
   const panBounds = useMemo(() => ({
     x: Math.max(0, chart.viewportWidth - viewport.width),
@@ -88,9 +92,20 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
   };
   const handleWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
     event.preventDefault();
+    if (event.ctrlKey) {
+      const zoomStep = event.deltaY < 0 ? 1.2 : 1 / 1.2;
+      setHorizontalZoom((current) => clampHorizontalZoom(current * zoomStep));
+      return;
+    }
     const horizontalDelta = event.shiftKey ? event.deltaY : event.deltaX;
     const verticalDelta = event.shiftKey ? 0 : event.deltaY;
     updatePan(pan.x - horizontalDelta, pan.y - verticalDelta);
+  };
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!event.ctrlKey || event.key !== "0") return;
+    event.preventDefault();
+    setHorizontalZoom(1);
+    setPan({ x: 0, y: 0 });
   };
 
   useDismissableMenu(toolbar, openMenu, () => setOpenMenu(undefined));
@@ -103,7 +118,7 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
             <WaveYAxis chart={chart} height={viewport.height} />
           </div>
         </div>
-        <div className={"wave-viewport " + (dragging ? "dragging" : "")} onWheel={handleWheel} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} onMouseLeave={() => setHover(undefined)}>
+        <div className={"wave-viewport " + (dragging ? "dragging" : "")} tabIndex={0} aria-label="波形绘图区，Ctrl 加滚轮缩放横轴，拖拽平移曲线" onKeyDown={handleKeyDown} onWheel={handleWheel} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} onMouseLeave={() => setHover(undefined)}>
           <div className="wave-pan-layer" style={{ width: chart.viewportWidth, height: chart.viewportHeight, transform: `translate(${pan.x}px, ${pan.y}px)` }}>
             <WaveSvg chart={chart} plot={plot} showLatestMarker={settings.showLatestMarker} onHover={setHover} onLeave={() => setHover(undefined)} />
           </div>
@@ -126,7 +141,7 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
       </div>
       <WaveMetadata channelCount={chart.series.length} chart={chart} sampleCount={visibleSamples.length} />
       <WaveLegend chart={chart} />
-      <div className="wave-footer"><span>数据源：RX 名称=数值帧</span><span>每通道窗口：{settings.samplesPerChannel}</span></div>
+      <div className="wave-footer"><span>数据源：RX 名称=数值帧</span><span>X {formatHorizontalZoom(horizontalZoom)} · 每通道 {visibleSampleLimit} 样本</span></div>
     </div>
   </section>;
 }
@@ -253,29 +268,41 @@ function useVisibleSamples(samples: WaveSample[], channels: WaveChannel[], sampl
   }, [channels, samples, samplesPerChannel]);
 }
 
-function useMeasuredViewport(plot: RefObject<HTMLDivElement>, samplesPerChannel: number, channelCount: number) {
+function useMeasuredViewport(plot: RefObject<HTMLDivElement>, samplesPerChannel: number, horizontalZoom: number, channelCount: number) {
   const [viewport, setViewport] = useState({ width: 900, height: 500, contentWidth: 1000, contentHeight: 560 });
   useEffect(() => {
     const element = plot.current;
     if (!element) return;
-    const update = () => setViewportFromElement(element, setViewport, samplesPerChannel, channelCount);
+    const update = () => setViewportFromElement(element, setViewport, samplesPerChannel, horizontalZoom, channelCount);
     update();
     const observer = new ResizeObserver(update);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [plot, samplesPerChannel, channelCount]);
+  }, [plot, samplesPerChannel, horizontalZoom, channelCount]);
   return viewport;
 }
 
-function setViewportFromElement(element: HTMLDivElement, setViewport: Dispatch<SetStateAction<{ width: number; height: number; contentWidth: number; contentHeight: number }>>, samplesPerChannel: number, channelCount: number) {
+function setViewportFromElement(element: HTMLDivElement, setViewport: Dispatch<SetStateAction<{ width: number; height: number; contentWidth: number; contentHeight: number }>>, samplesPerChannel: number, horizontalZoom: number, channelCount: number) {
   const bounds = element.getBoundingClientRect();
   const width = Math.max(1, Math.round(bounds.width) - WAVE_AXIS_WIDTH);
   const height = Math.max(1, Math.round(bounds.height) - WAVE_TOOLBAR_HEIGHT);
   // Samples from separate channels share one arrival timeline; they must not widen it repeatedly.
-  const contentWidth = Math.max(width, 900, samplesPerChannel * 4 + 120);
+  const contentWidth = Math.max(width, 900, samplesPerChannel * 4 * Math.max(horizontalZoom, 1) + 120);
   const contentHeight = Math.max(height, 560, channelCount * 70 + 420);
   const next = { width, height, contentWidth, contentHeight };
   setViewport((current) => current.width === next.width && current.height === next.height && current.contentWidth === next.contentWidth && current.contentHeight === next.contentHeight ? current : next);
+}
+
+function getVisibleSampleLimit(samplesPerChannel: number, horizontalZoom: number) {
+  return Math.round(samplesPerChannel / Math.min(horizontalZoom, 1));
+}
+
+function clampHorizontalZoom(zoom: number) {
+  return Math.min(MAX_HORIZONTAL_ZOOM, Math.max(MIN_HORIZONTAL_ZOOM, zoom));
+}
+
+function formatHorizontalZoom(zoom: number) {
+  return Math.round(zoom * 100) + "%";
 }
 
 function clampPan(pan: { x: number; y: number }, bounds: { x: number; y: number }) {
