@@ -175,7 +175,7 @@ export function useSerialSession(): SerialSession {
     const actionId = crypto.randomUUID();
     setError(undefined);
     try {
-      const result = await executeSerialCommand<{ type: "file_send_started"; action_id: string; file_size: number; chunk_size: number }>({ type: "send_file", session_id: sessionId, file_path: filePath, chunk_size: chunkSize, interval_ms: intervalMs, timeout_ms: 1000, action_id: actionId });
+      const result = await executeSerialCommand<{ type: "file_send_started"; action_id: string; file_size: number; chunk_size: number }>({ type: "send_file", session_id: sessionId, file_path: filePath, protocol: fileProtocol, chunk_size: chunkSize, interval_ms: intervalMs, timeout_ms: 1000, action_id: actionId });
       setFileProgress((current) => current?.action_id === result.action_id ? current : { action_id: result.action_id, file_path: filePath, file_size: result.file_size, sent_bytes: 0, chunk_size: result.chunk_size, completed: false, cancelled: false });
     } catch (cause) {
       setError(String(cause));

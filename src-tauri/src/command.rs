@@ -35,12 +35,26 @@ pub enum CoreError {
     FileSendBusy,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DataEncoding {
     Text,
     Hex,
     Base64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum FileTransferProtocol {
+    Null,
+    Xmodem,
+    #[serde(rename = "xmodem-1k")]
+    Xmodem1k,
+    Ymodem,
+}
+
+impl Default for FileTransferProtocol {
+    fn default() -> Self { Self::Null }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -200,6 +214,8 @@ pub enum SerialCommand {
     SendFile {
         session_id: String,
         file_path: String,
+        #[serde(default)]
+        protocol: FileTransferProtocol,
         chunk_size: usize,
         interval_ms: u64,
         timeout_ms: Option<u64>,
@@ -451,6 +467,7 @@ impl SerialCore {
             SerialCommand::SendFile {
                 session_id,
                 file_path,
+                protocol,
                 chunk_size,
                 interval_ms,
                 timeout_ms,
@@ -459,6 +476,7 @@ impl SerialCore {
                 self.send_file(
                     &session_id,
                     file_path,
+                    protocol,
                     chunk_size,
                     interval_ms,
                     timeout_ms,
@@ -637,13 +655,19 @@ impl SerialCore {
         &self,
         session_id: &str,
         file_path: String,
+        protocol: FileTransferProtocol,
         chunk_size: usize,
         interval_ms: u64,
         timeout_ms: Option<u64>,
         action_id: Option<String>,
     ) -> Result<CommandResult, CoreError> {
         let action_id = action_id.unwrap_or_else(|| Uuid::new_v4().to_string());
-        let chunk_size = chunk_size.clamp(1, 1024 * 1024);
+        let chunk_size = match protocol {
+            FileTransferProtocol::Null => chunk_size.clamp(1, 1024 * 1024),
+            FileTransferProtocol::Xmodem => 128,
+            FileTransferProtocol::Xmodem1k => 1024,
+            FileTransferProtocol::Ymodem => 1024,
+        };
         let metadata = tokio::fs::metadata(&file_path)
             .await
             .map_err(|error| CoreError::FileSend(error.to_string()))?;
@@ -674,6 +698,7 @@ impl SerialCore {
             let result = stream_file(
                 &file_path,
                 &action_for_task,
+                protocol,
                 file_size,
                 chunk_size,
                 interval_ms,
@@ -866,6 +891,7 @@ async fn append_frame(state: &Arc<Mutex<State>>, direction: Direction, bytes: Ve
 async fn stream_file(
     file_path: &str,
     action_id: &str,
+    protocol: FileTransferProtocol,
     file_size: u64,
     chunk_size: usize,
     interval_ms: u64,
@@ -883,6 +909,25 @@ async fn stream_file(
     };
     let mut sent_bytes = 0u64;
     let mut buffer = vec![0u8; chunk_size];
+    let mut cursor = state.lock().await.next_cursor.saturating_sub(1);
+    if protocol != FileTransferProtocol::Null {
+        if wait_for_control(state, changed, cursor, timeout_ms, &[0x15, 0x43]).await.is_none() {
+            return Err((0, false));
+        }
+        cursor = state.lock().await.next_cursor.saturating_sub(1);
+        if protocol == FileTransferProtocol::Ymodem {
+            let mut header = vec![0u8; 128];
+            let name = file_path.rsplit(['/', '\\']).next().unwrap_or("file.bin");
+            let metadata = format!("{}\0{}\0", name, file_size);
+            header[..metadata.len().min(128)].copy_from_slice(&metadata.as_bytes()[..metadata.len().min(128)]);
+            let frame = xmodem_frame(0, &header, false);
+            let before = state.lock().await.next_cursor.saturating_sub(1);
+            send_wire(&frame, outgoing.clone(), state, events, audit, changed, timeout_ms).await?;
+            if wait_for_control(state, changed, before, timeout_ms, &[0x06]).await.is_none() { return Err((0, false)); }
+            cursor = state.lock().await.next_cursor.saturating_sub(1);
+        }
+    }
+    let mut sequence = 1u8;
     loop {
         if cancel.lock().await.as_deref() == Some(action_id) {
             return Err((sent_bytes, true));
@@ -895,18 +940,17 @@ async fn stream_file(
             break;
         }
         let chunk = buffer[..read].to_vec();
-        if timeout(
-            Duration::from_millis(timeout_ms),
-            outgoing.send(chunk.clone()),
-        )
-        .await
-        .is_err()
-        {
-            return Err((sent_bytes, false));
+        let wire = match protocol {
+            FileTransferProtocol::Null => chunk.clone(),
+            FileTransferProtocol::Xmodem => xmodem_frame(sequence, &chunk, false),
+            FileTransferProtocol::Xmodem1k | FileTransferProtocol::Ymodem => xmodem_frame(sequence, &chunk, true),
+        };
+        let before = state.lock().await.next_cursor.saturating_sub(1);
+        send_wire(&wire, outgoing.clone(), state, events, audit, changed, timeout_ms).await?;
+        if protocol != FileTransferProtocol::Null {
+            if wait_for_control(state, changed, before, timeout_ms, &[0x06]).await.is_none() { return Err((sent_bytes, false)); }
+            sequence = sequence.wrapping_add(1);
         }
-        let frame = append_frame(state, Direction::Tx, chunk).await;
-        record_event(events, audit, frame_event(frame));
-        changed.notify_waiters();
         sent_bytes += read as u64;
         emit_file_progress(
             events,
@@ -925,6 +969,12 @@ async fn stream_file(
             tokio::time::sleep(Duration::from_millis(interval_ms)).await;
         }
     }
+    if protocol != FileTransferProtocol::Null {
+        let eot = [0x04];
+        let before = state.lock().await.next_cursor.saturating_sub(1);
+        send_wire(&eot, outgoing, state, events, audit, changed, timeout_ms).await?;
+        if wait_for_control(state, changed, before, timeout_ms, &[0x06]).await.is_none() { return Err((sent_bytes, false)); }
+    }
     emit_file_progress(
         events,
         audit,
@@ -939,6 +989,48 @@ async fn stream_file(
         },
     );
     Ok(sent_bytes)
+}
+
+async fn send_wire(
+    bytes: &[u8], outgoing: tokio::sync::mpsc::Sender<Vec<u8>>, state: &Arc<Mutex<State>>,
+    events: &broadcast::Sender<SerialEvent>, audit: &Arc<std::sync::Mutex<VecDeque<SerialEvent>>>, changed: &Arc<Notify>, timeout_ms: u64,
+) -> Result<(), (u64, bool)> {
+    timeout(Duration::from_millis(timeout_ms), outgoing.send(bytes.to_vec())).await.map_err(|_| (0, false)).and_then(|result| result.map_err(|_| (0, false)))?;
+    let frame = append_frame(state, Direction::Tx, bytes.to_vec()).await;
+    record_event(events, audit, frame_event(frame));
+    changed.notify_waiters();
+    Ok(())
+}
+
+async fn wait_for_control(state: &Arc<Mutex<State>>, changed: &Arc<Notify>, after_cursor: u64, timeout_ms: u64, accepted: &[u8]) -> Option<u8> {
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
+    let mut cursor = after_cursor;
+    loop {
+        let snapshot = state.lock().await;
+        for frame in snapshot.frames.iter().filter(|frame| frame.cursor > cursor && frame.direction == Direction::Rx) {
+            if let Ok(bytes) = BASE64.decode(&frame.raw_base64) {
+                if bytes.len() == 1 && accepted.contains(&bytes[0]) { return Some(bytes[0]); }
+            }
+            cursor = frame.cursor;
+        }
+        drop(snapshot);
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() { return None; }
+        if timeout(remaining, changed.notified()).await.is_err() { return None; }
+    }
+}
+
+fn xmodem_frame(sequence: u8, payload: &[u8], large: bool) -> Vec<u8> {
+    let (marker, size) = if large { (0x02, 1024) } else { (0x01, 128) };
+    let mut frame = vec![marker, sequence, 255 - sequence];
+    frame.extend(payload.iter().copied().chain(std::iter::repeat(0x1a)).take(size));
+    let crc = crc16(&frame[3..]);
+    frame.extend([(crc >> 8) as u8, crc as u8]);
+    frame
+}
+
+fn crc16(bytes: &[u8]) -> u16 {
+    bytes.iter().fold(0u16, |mut crc, byte| { crc ^= (*byte as u16) << 8; for _ in 0..8 { crc = if crc & 0x8000 != 0 { (crc << 1) ^ 0x1021 } else { crc << 1 }; } crc })
 }
 
 fn emit_file_progress(
@@ -1269,7 +1361,7 @@ mod tests {
         tokio::fs::write(&path, [1u8, 2, 3, 4, 5]).await.unwrap();
         let action_id = "file-test".to_string();
         let mut events = core.subscribe();
-        let result = core.execute(SerialCommand::SendFile { session_id: session, file_path: path.to_string_lossy().into_owned(), chunk_size: 2, interval_ms: 0, timeout_ms: Some(100), action_id: Some(action_id.clone()) }).await.unwrap();
+        let result = core.execute(SerialCommand::SendFile { session_id: session, file_path: path.to_string_lossy().into_owned(), protocol: FileTransferProtocol::Null, chunk_size: 2, interval_ms: 0, timeout_ms: Some(100), action_id: Some(action_id.clone()) }).await.unwrap();
         assert!(matches!(result, CommandResult::FileSendStarted { file_size: 5, chunk_size: 2, .. }));
         let mut progress = None;
         for _ in 0..20 {
@@ -1292,7 +1384,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("serialpilot-cancel-{}.bin", std::process::id()));
         tokio::fs::write(&path, vec![7u8; 256]).await.unwrap();
         let action_id = "cancel-test".to_string();
-        core.execute(SerialCommand::SendFile { session_id: session, file_path: path.to_string_lossy().into_owned(), chunk_size: 1, interval_ms: 5, timeout_ms: Some(100), action_id: Some(action_id.clone()) }).await.unwrap();
+        core.execute(SerialCommand::SendFile { session_id: session, file_path: path.to_string_lossy().into_owned(), protocol: FileTransferProtocol::Null, chunk_size: 1, interval_ms: 5, timeout_ms: Some(100), action_id: Some(action_id.clone()) }).await.unwrap();
         tokio::time::sleep(Duration::from_millis(8)).await;
         assert!(matches!(core.execute(SerialCommand::CancelSendFile { action_id }).await.unwrap(), CommandResult::FileSendCancelled { .. }));
         tokio::time::sleep(Duration::from_millis(15)).await;

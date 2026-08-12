@@ -44,12 +44,17 @@ impl SerialAdapter for MockSerialAdapter {
 
         let (outgoing, mut writes) = mpsc::channel::<Vec<u8>>(64);
         let (incoming_tx, incoming) = mpsc::channel::<Vec<u8>>(64);
+        let handshake_tx = incoming_tx.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            let _ = handshake_tx.send(vec![0x43]).await;
+        });
         let sample_tx = incoming_tx.clone();
         tokio::spawn(async move {
             while let Some(payload) = writes.recv().await {
                 tokio::time::sleep(Duration::from_millis(8)).await;
-                let mut response = vec![0xaa, 0x55];
-                response.extend(payload);
+                let mut response = if matches!(payload.first(), Some(0x01 | 0x02)) || payload == [0x04] { vec![0x06] } else { vec![0xaa, 0x55] };
+                if response[0] == 0xaa { response.extend(payload); }
                 if incoming_tx.send(response).await.is_err() {
                     break;
                 }
