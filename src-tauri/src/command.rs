@@ -54,7 +54,9 @@ pub enum FileTransferProtocol {
 }
 
 impl Default for FileTransferProtocol {
-    fn default() -> Self { Self::Null }
+    fn default() -> Self {
+        Self::Null
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -142,6 +144,27 @@ pub struct WaitCondition {
     pub regex: Option<String>,
     /// Reserved structured field matcher for future protocol decoders.
     pub protocol_field: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WaveChannel {
+    pub id: String,
+    pub name: String,
+    pub color: String,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BatchSendItem {
+    pub encoding: DataEncoding,
+    pub payload: String,
+    pub timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PortMonitorSample {
+    pub timestamp_ms: u64,
+    pub ports: Vec<PortInfo>,
 }
 
 impl WaitCondition {
@@ -244,6 +267,57 @@ pub enum SerialCommand {
         timeout_ms: u64,
         action_id: Option<String>,
     },
+    SendBatch {
+        session_id: String,
+        items: Vec<BatchSendItem>,
+        interval_ms: u64,
+        action_id: Option<String>,
+    },
+    ExchangeBatch {
+        session_id: String,
+        items: Vec<ExchangeItem>,
+        action_id: Option<String>,
+    },
+    WaitForAny {
+        session_id: String,
+        after_cursor: u64,
+        conditions: Vec<WaitCondition>,
+        timeout_ms: u64,
+    },
+    MonitorPorts {
+        duration_ms: u64,
+        interval_ms: u64,
+    },
+    Reconnect {
+        session_id: String,
+    },
+    WaveformListChannels,
+    WaveformSetChannels {
+        channels: Vec<WaveChannel>,
+    },
+    WaveformAddChannel {
+        name: String,
+        color: String,
+        enabled: bool,
+    },
+    WaveformUpdateChannel {
+        channel_id: String,
+        name: Option<String>,
+        color: Option<String>,
+        enabled: Option<bool>,
+    },
+    WaveformRemoveChannel {
+        channel_id: String,
+    },
+    WaveformClearSamples,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExchangeItem {
+    pub encoding: DataEncoding,
+    pub payload: String,
+    pub condition: WaitCondition,
+    pub timeout_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -293,6 +367,36 @@ pub enum CommandResult {
         timed_out: bool,
         cursor_expired: bool,
     },
+    SentBatch {
+        results: Vec<CommandResult>,
+    },
+    ExchangedBatch {
+        results: Vec<CommandResult>,
+    },
+    WaitedAny {
+        matched: Option<Frame>,
+        matched_condition: Option<usize>,
+        next_cursor: u64,
+        timed_out: bool,
+        cursor_expired: bool,
+    },
+    PortMonitor {
+        samples: Vec<PortMonitorSample>,
+    },
+    Reconnected {
+        session_id: String,
+        rx_cursor: u64,
+    },
+    WaveformChannels {
+        channels: Vec<WaveChannel>,
+    },
+    WaveformChannel {
+        channel: WaveChannel,
+        channels: Vec<WaveChannel>,
+    },
+    WaveformSamplesCleared {
+        generation: u64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -341,6 +445,8 @@ struct State {
     dropped_frames: u64,
     rx_bytes: u64,
     tx_bytes: u64,
+    wave_channels: Vec<WaveChannel>,
+    waveform_generation: u64,
 }
 
 impl Default for State {
@@ -353,6 +459,8 @@ impl Default for State {
             dropped_frames: 0,
             rx_bytes: 0,
             tx_bytes: 0,
+            wave_channels: Vec::new(),
+            waveform_generation: 0,
         }
     }
 }
@@ -416,7 +524,9 @@ impl SerialCore {
         let action_id = match &command {
             SerialCommand::Send { action_id, .. }
             | SerialCommand::Exchange { action_id, .. }
-            | SerialCommand::SendFile { action_id, .. } => action_id.clone(),
+            | SerialCommand::SendFile { action_id, .. }
+            | SerialCommand::SendBatch { action_id, .. }
+            | SerialCommand::ExchangeBatch { action_id, .. } => action_id.clone(),
             _ => None,
         };
         self.emit(
@@ -529,6 +639,271 @@ impl SerialCore {
                 )
                 .await
             }
+            SerialCommand::SendBatch {
+                session_id,
+                items,
+                interval_ms,
+                action_id,
+            } => {
+                self.send_batch(&session_id, items, interval_ms, action_id)
+                    .await
+            }
+            SerialCommand::ExchangeBatch {
+                session_id,
+                items,
+                action_id,
+            } => self.exchange_batch(&session_id, items, action_id).await,
+            SerialCommand::WaitForAny {
+                session_id,
+                after_cursor,
+                conditions,
+                timeout_ms,
+            } => {
+                self.ensure_session(&session_id).await?;
+                let (matched, matched_condition, next_cursor, timed_out, cursor_expired) = self
+                    .wait_for_any(after_cursor, conditions, timeout_ms)
+                    .await;
+                Ok(CommandResult::WaitedAny {
+                    matched,
+                    matched_condition,
+                    next_cursor,
+                    timed_out,
+                    cursor_expired,
+                })
+            }
+            SerialCommand::MonitorPorts {
+                duration_ms,
+                interval_ms,
+            } => self.monitor_ports(duration_ms, interval_ms).await,
+            SerialCommand::Reconnect { session_id } => self.reconnect(&session_id).await,
+            SerialCommand::WaveformListChannels => Ok(CommandResult::WaveformChannels {
+                channels: self.state.lock().await.wave_channels.clone(),
+            }),
+            SerialCommand::WaveformSetChannels { channels } => {
+                let mut state = self.state.lock().await;
+                state.wave_channels = channels;
+                Ok(CommandResult::WaveformChannels {
+                    channels: state.wave_channels.clone(),
+                })
+            }
+            SerialCommand::WaveformAddChannel {
+                name,
+                color,
+                enabled,
+            } => {
+                let mut state = self.state.lock().await;
+                let channel = WaveChannel {
+                    id: Uuid::new_v4().to_string(),
+                    name,
+                    color,
+                    enabled,
+                };
+                state.wave_channels.push(channel.clone());
+                Ok(CommandResult::WaveformChannel {
+                    channel,
+                    channels: state.wave_channels.clone(),
+                })
+            }
+            SerialCommand::WaveformUpdateChannel {
+                channel_id,
+                name,
+                color,
+                enabled,
+            } => {
+                let mut state = self.state.lock().await;
+                let channel = state
+                    .wave_channels
+                    .iter_mut()
+                    .find(|channel| channel.id == channel_id)
+                    .ok_or_else(|| CoreError::Adapter("waveform channel not found".into()))?;
+                if let Some(name) = name {
+                    channel.name = name;
+                }
+                if let Some(color) = color {
+                    channel.color = color;
+                }
+                if let Some(enabled) = enabled {
+                    channel.enabled = enabled;
+                }
+                Ok(CommandResult::WaveformChannel {
+                    channel: channel.clone(),
+                    channels: state.wave_channels.clone(),
+                })
+            }
+            SerialCommand::WaveformRemoveChannel { channel_id } => {
+                let mut state = self.state.lock().await;
+                state
+                    .wave_channels
+                    .retain(|channel| channel.id != channel_id);
+                Ok(CommandResult::WaveformChannels {
+                    channels: state.wave_channels.clone(),
+                })
+            }
+            SerialCommand::WaveformClearSamples => {
+                let mut state = self.state.lock().await;
+                state.waveform_generation = state.waveform_generation.saturating_add(1);
+                Ok(CommandResult::WaveformSamplesCleared {
+                    generation: state.waveform_generation,
+                })
+            }
+        }
+    }
+
+    async fn send_batch(
+        &self,
+        session_id: &str,
+        items: Vec<BatchSendItem>,
+        interval_ms: u64,
+        action_id: Option<String>,
+    ) -> Result<CommandResult, CoreError> {
+        if items.is_empty() || items.len() > 256 {
+            return Err(CoreError::Adapter(
+                "send_batch requires 1..=256 items".into(),
+            ));
+        }
+        let item_count = items.len();
+        let mut results = Vec::with_capacity(item_count);
+        for (index, item) in items.into_iter().enumerate() {
+            results.push(
+                self.send(
+                    session_id,
+                    item.encoding,
+                    item.payload,
+                    Some(format!(
+                        "{}-{index}",
+                        action_id
+                            .clone()
+                            .unwrap_or_else(|| Uuid::new_v4().to_string())
+                    )),
+                    item.timeout_ms,
+                )
+                .await?,
+            );
+            if interval_ms > 0 && index + 1 < item_count {
+                tokio::time::sleep(Duration::from_millis(interval_ms)).await;
+            }
+        }
+        Ok(CommandResult::SentBatch { results })
+    }
+
+    async fn exchange_batch(
+        &self,
+        session_id: &str,
+        items: Vec<ExchangeItem>,
+        action_id: Option<String>,
+    ) -> Result<CommandResult, CoreError> {
+        if items.is_empty() || items.len() > 128 {
+            return Err(CoreError::Adapter(
+                "exchange_batch requires 1..=128 items".into(),
+            ));
+        }
+        let prefix = action_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+        let mut results = Vec::with_capacity(items.len());
+        for (index, item) in items.into_iter().enumerate() {
+            results.push(
+                self.exchange(
+                    session_id,
+                    item.encoding,
+                    item.payload,
+                    item.condition,
+                    item.timeout_ms,
+                    Some(format!("{prefix}-{index}")),
+                )
+                .await?,
+            );
+        }
+        Ok(CommandResult::ExchangedBatch { results })
+    }
+
+    async fn wait_for_any(
+        &self,
+        after_cursor: u64,
+        conditions: Vec<WaitCondition>,
+        timeout_ms: u64,
+    ) -> (Option<Frame>, Option<usize>, u64, bool, bool) {
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms.min(300_000));
+        let mut cursor = after_cursor;
+        loop {
+            let snapshot = self.state.lock().await;
+            let expired = snapshot
+                .frames
+                .front()
+                .map(|frame| cursor + 1 < frame.cursor)
+                .unwrap_or(false);
+            let frames: Vec<Frame> = snapshot
+                .frames
+                .iter()
+                .filter(|frame| frame.cursor > cursor && frame.direction == Direction::Rx)
+                .cloned()
+                .collect();
+            drop(snapshot);
+            for frame in frames {
+                cursor = frame.cursor;
+                if let Some(index) = conditions
+                    .iter()
+                    .position(|condition| condition.matches(&frame))
+                {
+                    return (Some(frame), Some(index), cursor, false, expired);
+                }
+            }
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                return (None, None, cursor, true, expired);
+            }
+            if timeout(remaining, self.changed.notified()).await.is_err() {
+                return (None, None, cursor, true, expired);
+            }
+        }
+    }
+
+    async fn monitor_ports(
+        &self,
+        duration_ms: u64,
+        interval_ms: u64,
+    ) -> Result<CommandResult, CoreError> {
+        let duration_ms = duration_ms.min(300_000);
+        let interval_ms = interval_ms.clamp(50, 60_000);
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(duration_ms);
+        let mut samples = Vec::new();
+        loop {
+            samples.push(PortMonitorSample {
+                timestamp_ms: now_ms(),
+                ports: self.adapter.list_ports().await?,
+            });
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            tokio::time::sleep(remaining.min(Duration::from_millis(interval_ms))).await;
+        }
+        Ok(CommandResult::PortMonitor { samples })
+    }
+
+    async fn reconnect(&self, session_id: &str) -> Result<CommandResult, CoreError> {
+        let config = self
+            .state
+            .lock()
+            .await
+            .session
+            .as_ref()
+            .ok_or(CoreError::NotOpen)
+            .and_then(|session| {
+                if session.id == session_id {
+                    Ok(session.config.clone())
+                } else {
+                    Err(CoreError::InvalidSession)
+                }
+            })?;
+        self.close(session_id).await?;
+        match self.open(config).await? {
+            CommandResult::Opened {
+                session_id,
+                rx_cursor,
+            } => Ok(CommandResult::Reconnected {
+                session_id,
+                rx_cursor,
+            }),
+            _ => unreachable!(),
         }
     }
 
@@ -672,7 +1047,9 @@ impl SerialCore {
             .await
             .map_err(|error| CoreError::FileSend(error.to_string()))?;
         if !metadata.is_file() {
-            return Err(CoreError::FileSend("selected path is not a regular file".into()));
+            return Err(CoreError::FileSend(
+                "selected path is not a regular file".into(),
+            ));
         }
         let file_size = metadata.len();
         self.ensure_session(session_id).await?;
@@ -911,20 +1288,43 @@ async fn stream_file(
     let mut buffer = vec![0u8; chunk_size];
     let cursor = state.lock().await.next_cursor.saturating_sub(1);
     if protocol != FileTransferProtocol::Null {
-        if wait_for_control(state, changed, cursor, timeout_ms, &[0x15, 0x43]).await.is_none() {
+        if wait_for_control(state, changed, cursor, timeout_ms, &[0x15, 0x43])
+            .await
+            .is_none()
+        {
             return Err((0, false));
         }
         if protocol == FileTransferProtocol::Ymodem {
             let mut header = vec![0u8; 128];
             let name = file_path.rsplit(['/', '\\']).next().unwrap_or("file.bin");
             let metadata = format!("{}\0{}\0", name, file_size);
-            header[..metadata.len().min(128)].copy_from_slice(&metadata.as_bytes()[..metadata.len().min(128)]);
+            header[..metadata.len().min(128)]
+                .copy_from_slice(&metadata.as_bytes()[..metadata.len().min(128)]);
             let frame = xmodem_frame(0, &header, false);
             let before = state.lock().await.next_cursor.saturating_sub(1);
-            send_wire(&frame, outgoing.clone(), state, events, audit, changed, timeout_ms).await?;
-            if wait_for_control(state, changed, before, timeout_ms, &[0x06]).await.is_none() { return Err((0, false)); }
+            send_wire(
+                &frame,
+                outgoing.clone(),
+                state,
+                events,
+                audit,
+                changed,
+                timeout_ms,
+            )
+            .await?;
+            if wait_for_control(state, changed, before, timeout_ms, &[0x06])
+                .await
+                .is_none()
+            {
+                return Err((0, false));
+            }
             let after_header = state.lock().await.next_cursor.saturating_sub(1);
-            if wait_for_control(state, changed, after_header, timeout_ms, &[0x43]).await.is_none() { return Err((0, false)); }
+            if wait_for_control(state, changed, after_header, timeout_ms, &[0x43])
+                .await
+                .is_none()
+            {
+                return Err((0, false));
+            }
         }
     }
     let mut sequence = 1u8;
@@ -943,12 +1343,28 @@ async fn stream_file(
         let wire = match protocol {
             FileTransferProtocol::Null => chunk.clone(),
             FileTransferProtocol::Xmodem => xmodem_frame(sequence, &chunk, false),
-            FileTransferProtocol::Xmodem1k | FileTransferProtocol::Ymodem => xmodem_frame(sequence, &chunk, true),
+            FileTransferProtocol::Xmodem1k | FileTransferProtocol::Ymodem => {
+                xmodem_frame(sequence, &chunk, true)
+            }
         };
         let before = state.lock().await.next_cursor.saturating_sub(1);
-        send_wire(&wire, outgoing.clone(), state, events, audit, changed, timeout_ms).await?;
+        send_wire(
+            &wire,
+            outgoing.clone(),
+            state,
+            events,
+            audit,
+            changed,
+            timeout_ms,
+        )
+        .await?;
         if protocol != FileTransferProtocol::Null {
-            if wait_for_control(state, changed, before, timeout_ms, &[0x06]).await.is_none() { return Err((sent_bytes, false)); }
+            if wait_for_control(state, changed, before, timeout_ms, &[0x06])
+                .await
+                .is_none()
+            {
+                return Err((sent_bytes, false));
+            }
             sequence = sequence.wrapping_add(1);
         }
         sent_bytes += read as u64;
@@ -973,7 +1389,12 @@ async fn stream_file(
         let eot = [0x04];
         let before = state.lock().await.next_cursor.saturating_sub(1);
         send_wire(&eot, outgoing, state, events, audit, changed, timeout_ms).await?;
-        if wait_for_control(state, changed, before, timeout_ms, &[0x06]).await.is_none() { return Err((sent_bytes, false)); }
+        if wait_for_control(state, changed, before, timeout_ms, &[0x06])
+            .await
+            .is_none()
+        {
+            return Err((sent_bytes, false));
+        }
     }
     emit_file_progress(
         events,
@@ -992,46 +1413,90 @@ async fn stream_file(
 }
 
 async fn send_wire(
-    bytes: &[u8], outgoing: tokio::sync::mpsc::Sender<Vec<u8>>, state: &Arc<Mutex<State>>,
-    events: &broadcast::Sender<SerialEvent>, audit: &Arc<std::sync::Mutex<VecDeque<SerialEvent>>>, changed: &Arc<Notify>, timeout_ms: u64,
+    bytes: &[u8],
+    outgoing: tokio::sync::mpsc::Sender<Vec<u8>>,
+    state: &Arc<Mutex<State>>,
+    events: &broadcast::Sender<SerialEvent>,
+    audit: &Arc<std::sync::Mutex<VecDeque<SerialEvent>>>,
+    changed: &Arc<Notify>,
+    timeout_ms: u64,
 ) -> Result<(), (u64, bool)> {
-    timeout(Duration::from_millis(timeout_ms), outgoing.send(bytes.to_vec())).await.map_err(|_| (0, false)).and_then(|result| result.map_err(|_| (0, false)))?;
+    timeout(
+        Duration::from_millis(timeout_ms),
+        outgoing.send(bytes.to_vec()),
+    )
+    .await
+    .map_err(|_| (0, false))
+    .and_then(|result| result.map_err(|_| (0, false)))?;
     let frame = append_frame(state, Direction::Tx, bytes.to_vec()).await;
     record_event(events, audit, frame_event(frame));
     changed.notify_waiters();
     Ok(())
 }
 
-async fn wait_for_control(state: &Arc<Mutex<State>>, changed: &Arc<Notify>, after_cursor: u64, timeout_ms: u64, accepted: &[u8]) -> Option<u8> {
+async fn wait_for_control(
+    state: &Arc<Mutex<State>>,
+    changed: &Arc<Notify>,
+    after_cursor: u64,
+    timeout_ms: u64,
+    accepted: &[u8],
+) -> Option<u8> {
     let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
     let mut cursor = after_cursor;
     loop {
         let snapshot = state.lock().await;
-        let frames: Vec<_> = snapshot.frames.iter().filter(|frame| frame.cursor > cursor && frame.direction == Direction::Rx).cloned().collect();
+        let frames: Vec<_> = snapshot
+            .frames
+            .iter()
+            .filter(|frame| frame.cursor > cursor && frame.direction == Direction::Rx)
+            .cloned()
+            .collect();
         drop(snapshot);
         for frame in frames {
             if let Ok(bytes) = BASE64.decode(&frame.raw_base64) {
-                if bytes.len() == 1 && accepted.contains(&bytes[0]) { return Some(bytes[0]); }
+                if bytes.len() == 1 && accepted.contains(&bytes[0]) {
+                    return Some(bytes[0]);
+                }
             }
             cursor = frame.cursor;
         }
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        if remaining.is_zero() { return None; }
-        if timeout(remaining, changed.notified()).await.is_err() { return None; }
+        if remaining.is_zero() {
+            return None;
+        }
+        if timeout(remaining, changed.notified()).await.is_err() {
+            return None;
+        }
     }
 }
 
 fn xmodem_frame(sequence: u8, payload: &[u8], large: bool) -> Vec<u8> {
     let (marker, size) = if large { (0x02, 1024) } else { (0x01, 128) };
     let mut frame = vec![marker, sequence, 255 - sequence];
-    frame.extend(payload.iter().copied().chain(std::iter::repeat(0x1a)).take(size));
+    frame.extend(
+        payload
+            .iter()
+            .copied()
+            .chain(std::iter::repeat(0x1a))
+            .take(size),
+    );
     let crc = crc16(&frame[3..]);
     frame.extend([(crc >> 8) as u8, crc as u8]);
     frame
 }
 
 fn crc16(bytes: &[u8]) -> u16 {
-    bytes.iter().fold(0u16, |mut crc, byte| { crc ^= (*byte as u16) << 8; for _ in 0..8 { crc = if crc & 0x8000 != 0 { (crc << 1) ^ 0x1021 } else { crc << 1 }; } crc })
+    bytes.iter().fold(0u16, |mut crc, byte| {
+        crc ^= (*byte as u16) << 8;
+        for _ in 0..8 {
+            crc = if crc & 0x8000 != 0 {
+                (crc << 1) ^ 0x1021
+            } else {
+                crc << 1
+            };
+        }
+        crc
+    })
 }
 
 fn emit_file_progress(
@@ -1155,6 +1620,17 @@ fn command_name(command: &SerialCommand) -> &'static str {
         SerialCommand::ReadSince { .. } => "serial.read_since",
         SerialCommand::WaitFor { .. } => "serial.wait_for",
         SerialCommand::Exchange { .. } => "serial.exchange",
+        SerialCommand::SendBatch { .. } => "serial.send_batch",
+        SerialCommand::ExchangeBatch { .. } => "serial.exchange_batch",
+        SerialCommand::WaitForAny { .. } => "serial.wait_for_any",
+        SerialCommand::MonitorPorts { .. } => "serial.monitor_ports",
+        SerialCommand::Reconnect { .. } => "serial.reconnect",
+        SerialCommand::WaveformListChannels => "waveform.list_channels",
+        SerialCommand::WaveformSetChannels { .. } => "waveform.set_channels",
+        SerialCommand::WaveformAddChannel { .. } => "waveform.add_channel",
+        SerialCommand::WaveformUpdateChannel { .. } => "waveform.update_channel",
+        SerialCommand::WaveformRemoveChannel { .. } => "waveform.remove_channel",
+        SerialCommand::WaveformClearSamples => "waveform.clear_samples",
     }
 }
 fn now_ms() -> u64 {
@@ -1357,23 +1833,66 @@ mod tests {
         let path = std::env::temp_dir().join(format!(
             "serialpilot-file-{}-{}.bin",
             std::process::id(),
-            SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         tokio::fs::write(&path, [1u8, 2, 3, 4, 5]).await.unwrap();
         let action_id = "file-test".to_string();
         let mut events = core.subscribe();
-        let result = core.execute(SerialCommand::SendFile { session_id: session, file_path: path.to_string_lossy().into_owned(), protocol: FileTransferProtocol::Null, chunk_size: 2, interval_ms: 0, timeout_ms: Some(100), action_id: Some(action_id.clone()) }).await.unwrap();
-        assert!(matches!(result, CommandResult::FileSendStarted { file_size: 5, chunk_size: 2, .. }));
+        let result = core
+            .execute(SerialCommand::SendFile {
+                session_id: session,
+                file_path: path.to_string_lossy().into_owned(),
+                protocol: FileTransferProtocol::Null,
+                chunk_size: 2,
+                interval_ms: 0,
+                timeout_ms: Some(100),
+                action_id: Some(action_id.clone()),
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            result,
+            CommandResult::FileSendStarted {
+                file_size: 5,
+                chunk_size: 2,
+                ..
+            }
+        ));
         let mut progress = None;
         for _ in 0..20 {
             if let Some(event) = events.try_recv().ok() {
-                if matches!(event.kind, EventKind::FileProgress) { progress = serde_json::from_value::<FileProgress>(event.detail).ok(); }
+                if matches!(event.kind, EventKind::FileProgress) {
+                    progress = serde_json::from_value::<FileProgress>(event.detail).ok();
+                }
             }
-            if progress.as_ref().is_some_and(|item| item.completed) { break; }
+            if progress.as_ref().is_some_and(|item| item.completed) {
+                break;
+            }
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
-        let read = match core.execute(SerialCommand::ReadSince { session_id: core.status().await.session_id.unwrap(), after_cursor: cursor, max_bytes: 1024, max_frames: 16 }).await.unwrap() { CommandResult::Read { read } => read, _ => unreachable!() };
-        assert_eq!(read.frames.iter().filter(|frame| frame.direction == Direction::Tx).count(), 3);
+        let read = match core
+            .execute(SerialCommand::ReadSince {
+                session_id: core.status().await.session_id.unwrap(),
+                after_cursor: cursor,
+                max_bytes: 1024,
+                max_frames: 16,
+            })
+            .await
+            .unwrap()
+        {
+            CommandResult::Read { read } => read,
+            _ => unreachable!(),
+        };
+        assert_eq!(
+            read.frames
+                .iter()
+                .filter(|frame| frame.direction == Direction::Tx)
+                .count(),
+            3
+        );
         assert!(progress.is_some_and(|item| item.completed && item.sent_bytes == 5));
         tokio::fs::remove_file(path).await.unwrap();
     }
@@ -1382,12 +1901,28 @@ mod tests {
     async fn file_send_can_be_cancelled() {
         let core = core();
         let (session, _) = open(&core).await;
-        let path = std::env::temp_dir().join(format!("serialpilot-cancel-{}.bin", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("serialpilot-cancel-{}.bin", std::process::id()));
         tokio::fs::write(&path, vec![7u8; 256]).await.unwrap();
         let action_id = "cancel-test".to_string();
-        core.execute(SerialCommand::SendFile { session_id: session, file_path: path.to_string_lossy().into_owned(), protocol: FileTransferProtocol::Null, chunk_size: 1, interval_ms: 5, timeout_ms: Some(100), action_id: Some(action_id.clone()) }).await.unwrap();
+        core.execute(SerialCommand::SendFile {
+            session_id: session,
+            file_path: path.to_string_lossy().into_owned(),
+            protocol: FileTransferProtocol::Null,
+            chunk_size: 1,
+            interval_ms: 5,
+            timeout_ms: Some(100),
+            action_id: Some(action_id.clone()),
+        })
+        .await
+        .unwrap();
         tokio::time::sleep(Duration::from_millis(8)).await;
-        assert!(matches!(core.execute(SerialCommand::CancelSendFile { action_id }).await.unwrap(), CommandResult::FileSendCancelled { .. }));
+        assert!(matches!(
+            core.execute(SerialCommand::CancelSendFile { action_id })
+                .await
+                .unwrap(),
+            CommandResult::FileSendCancelled { .. }
+        ));
         tokio::time::sleep(Duration::from_millis(15)).await;
         assert!(core.file_send.lock().await.is_none());
         tokio::fs::remove_file(path).await.unwrap();

@@ -50,7 +50,9 @@ cargo run --manifest-path src-tauri/Cargo.toml --bin serialpilot-mcp
 
 Send newline-delimited JSON-RPC requests on stdin. Protocol responses are written to stdout; logs are written only to stderr.
 
-The MCP tool catalogue includes `serial.list_ports`, `serial.open`, `serial.close`, `serial.configure`, `serial.status`, `serial.send`, `serial.send_file`, `serial.cancel_send_file`, `serial.read_since`, `serial.wait_for`, and `serial.exchange`. File transfer accepts `null`, `xmodem`, `xmodem-1k`, and `ymodem`; omitted chunk and interval values use bounded defaults.
+The MCP tool catalogue includes the core serial tools plus bounded automation tools: `serial.send_batch`, `serial.exchange_batch`, `serial.wait_for_any`, `serial.monitor_ports`, and `serial.reconnect`. Waveform tools are `waveform.list_channels`, `waveform.add_channel`, `waveform.update_channel`, `waveform.remove_channel`, and `waveform.clear_samples`. File transfer accepts `null`, `xmodem`, `xmodem-1k`, and `ymodem`; batch sizes, monitor duration, and wait timeouts are bounded by the Rust core.
+
+Waveform channel tools update the same channel state used by the desktop waveform view. Channel names such as `X1`, `X2`, and `X3` are matched against named RX values; clearing waveform samples only clears the derived display projection and never deletes raw RX frames.
 
 For MCP Streamable HTTP, which is the recommended remote transport for this project:
 

@@ -58,6 +58,24 @@ pub fn tool_command(name: &str, arguments: Value) -> Result<SerialCommand, Strin
         "serial.read_since" => decode_tagged("read_since", arguments),
         "serial.wait_for" => decode_tagged("wait_for", arguments),
         "serial.exchange" => decode_tagged("exchange", arguments),
+        "serial.send_batch" => {
+            decode_with_defaults("send_batch", arguments, &[("interval_ms", json!(0))])
+        }
+        "serial.exchange_batch" => decode_tagged("exchange_batch", arguments),
+        "serial.wait_for_any" => decode_tagged("wait_for_any", arguments),
+        "serial.monitor_ports" => {
+            decode_with_defaults("monitor_ports", arguments, &[("interval_ms", json!(1000))])
+        }
+        "serial.reconnect" => decode_tagged("reconnect", arguments),
+        "waveform.list_channels" => Ok(SerialCommand::WaveformListChannels),
+        "waveform.add_channel" => decode_with_defaults(
+            "waveform_add_channel",
+            arguments,
+            &[("enabled", json!(true))],
+        ),
+        "waveform.update_channel" => decode_tagged("waveform_update_channel", arguments),
+        "waveform.remove_channel" => decode_tagged("waveform_remove_channel", arguments),
+        "waveform.clear_samples" => Ok(SerialCommand::WaveformClearSamples),
         _ => Err(format!("unknown SerialPilot tool: {name}")),
     }
 }
@@ -99,6 +117,24 @@ fn decode_tagged(tag: &str, arguments: Value) -> Result<SerialCommand, String> {
         .as_object()
         .cloned()
         .ok_or("tool arguments must be an object")?;
+    object.insert("type".into(), Value::String(tag.into()));
+    serde_json::from_value(Value::Object(object)).map_err(|error| error.to_string())
+}
+
+fn decode_with_defaults(
+    tag: &str,
+    arguments: Value,
+    defaults: &[(&str, Value)],
+) -> Result<SerialCommand, String> {
+    let mut object = arguments
+        .as_object()
+        .cloned()
+        .ok_or("tool arguments must be an object")?;
+    for (name, value) in defaults {
+        object
+            .entry((*name).to_owned())
+            .or_insert_with(|| value.clone());
+    }
     object.insert("type".into(), Value::String(tag.into()));
     serde_json::from_value(Value::Object(object)).map_err(|error| error.to_string())
 }
@@ -288,6 +324,106 @@ pub fn tools() -> Vec<Value> {
                 ],
             ),
         ),
+        tool(
+            "serial.send_batch",
+            "Send a bounded sequence of payloads in order.",
+            object_schema(
+                vec![
+                    ("session_id", string_schema()),
+                    (
+                        "items",
+                        json!({ "type": "array", "minItems": 1, "maxItems": 256 }),
+                    ),
+                    ("interval_ms", integer_schema()),
+                    ("action_id", string_schema()),
+                ],
+                vec!["session_id", "items"],
+            ),
+        ),
+        tool(
+            "serial.exchange_batch",
+            "Run bounded request-response transactions in order.",
+            object_schema(
+                vec![
+                    ("session_id", string_schema()),
+                    (
+                        "items",
+                        json!({ "type": "array", "minItems": 1, "maxItems": 128 }),
+                    ),
+                    ("action_id", string_schema()),
+                ],
+                vec!["session_id", "items"],
+            ),
+        ),
+        tool(
+            "serial.wait_for_any",
+            "Wait for the first matching condition from a bounded list.",
+            object_schema(
+                vec![
+                    ("session_id", string_schema()),
+                    ("after_cursor", integer_schema()),
+                    ("conditions", json!({ "type": "array", "minItems": 1 })),
+                    ("timeout_ms", integer_schema()),
+                ],
+                vec!["session_id", "after_cursor", "conditions", "timeout_ms"],
+            ),
+        ),
+        tool(
+            "serial.monitor_ports",
+            "Poll available ports for a bounded period.",
+            object_schema(
+                vec![
+                    ("duration_ms", integer_schema()),
+                    ("interval_ms", integer_schema()),
+                ],
+                vec!["duration_ms"],
+            ),
+        ),
+        tool(
+            "serial.reconnect",
+            "Close and reopen the current session with its existing configuration.",
+            object_schema(vec![("session_id", string_schema())], vec!["session_id"]),
+        ),
+        tool(
+            "waveform.list_channels",
+            "List user-configured waveform channels.",
+            object_schema(vec![], vec![]),
+        ),
+        tool(
+            "waveform.add_channel",
+            "Add a named waveform channel with a line color.",
+            object_schema(
+                vec![
+                    ("name", string_schema()),
+                    ("color", string_schema()),
+                    ("enabled", boolean_schema()),
+                ],
+                vec!["name", "color"],
+            ),
+        ),
+        tool(
+            "waveform.update_channel",
+            "Update a waveform channel name, color, or enabled state.",
+            object_schema(
+                vec![
+                    ("channel_id", string_schema()),
+                    ("name", string_schema()),
+                    ("color", string_schema()),
+                    ("enabled", boolean_schema()),
+                ],
+                vec!["channel_id"],
+            ),
+        ),
+        tool(
+            "waveform.remove_channel",
+            "Remove a configured waveform channel.",
+            object_schema(vec![("channel_id", string_schema())], vec!["channel_id"]),
+        ),
+        tool(
+            "waveform.clear_samples",
+            "Clear derived waveform samples without changing raw RX frames.",
+            object_schema(vec![], vec![]),
+        ),
     ]
 }
 
@@ -373,7 +509,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(names.contains(&"serial.close".to_owned()));
         assert!(names.contains(&"serial.configure".to_owned()));
-        assert_eq!(names.len(), 11);
+        assert_eq!(names.len(), 21);
     }
 
     #[test]
@@ -411,6 +547,35 @@ mod tests {
             }
             _ => panic!("unexpected command"),
         }
+    }
+
+    #[test]
+    fn decodes_automation_and_waveform_tools() {
+        assert!(matches!(
+            tool_command(
+                "serial.send_batch",
+                json!({ "session_id": "s", "items": [] })
+            ),
+            Ok(SerialCommand::SendBatch { .. })
+        ));
+        assert!(matches!(
+            tool_command(
+                "serial.wait_for_any",
+                json!({ "session_id": "s", "after_cursor": 0, "conditions": [], "timeout_ms": 1 })
+            ),
+            Ok(SerialCommand::WaitForAny { .. })
+        ));
+        assert!(matches!(
+            tool_command("waveform.list_channels", json!({})),
+            Ok(SerialCommand::WaveformListChannels)
+        ));
+        assert!(matches!(
+            tool_command(
+                "waveform.add_channel",
+                json!({ "name": "X1", "color": "#61d792", "enabled": true })
+            ),
+            Ok(SerialCommand::WaveformAddChannel { .. })
+        ));
     }
 
     #[tokio::test]
