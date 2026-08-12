@@ -58,6 +58,7 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
   const [horizontalZoom, setHorizontalZoom] = useState(1);
+  const [followingLatest, setFollowingLatest] = useState(true);
   const drag = useRef<{ startX: number; startY: number; originX: number; originY: number }>();
   const visibleSampleLimit = getVisibleSampleLimit(settings.samplesPerChannel, horizontalZoom);
   const visibleSamples = useVisibleSamples(samples, channels, visibleSampleLimit);
@@ -68,14 +69,21 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
     y: Math.max(0, chart.viewportHeight - viewport.height),
   }), [chart.viewportHeight, chart.viewportWidth, viewport.height, viewport.width]);
   const latestValues = useMemo(() => getLatestValues(samples), [samples]);
+  const latestCursor = visibleSamples.at(-1)?.cursor;
 
   useEffect(() => {
     setPan((current) => clampPan(current, panBounds));
   }, [panBounds]);
 
+  useEffect(() => {
+    if (!followingLatest) return;
+    setPan({ x: -panBounds.x, y: 0 });
+  }, [followingLatest, latestCursor, panBounds]);
+
   const updatePan = (x: number, y: number) => setPan(clampPan({ x, y }, panBounds));
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
+    setFollowingLatest(false);
     event.currentTarget.setPointerCapture(event.pointerId);
     drag.current = { startX: event.clientX, startY: event.clientY, originX: pan.x, originY: pan.y };
     setDragging(true);
@@ -97,6 +105,7 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
       setHorizontalZoom((current) => clampHorizontalZoom(current * zoomStep));
       return;
     }
+    setFollowingLatest(false);
     const horizontalDelta = event.shiftKey ? event.deltaY : event.deltaX;
     const verticalDelta = event.shiftKey ? 0 : event.deltaY;
     updatePan(pan.x - horizontalDelta, pan.y - verticalDelta);
@@ -106,6 +115,11 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
     event.preventDefault();
     setHorizontalZoom(1);
     setPan({ x: 0, y: 0 });
+    setFollowingLatest(false);
+  };
+  const jumpToLatest = () => {
+    setFollowingLatest(true);
+    setPan({ x: -panBounds.x, y: 0 });
   };
 
   useDismissableMenu(toolbar, openMenu, () => setOpenMenu(undefined));
@@ -133,8 +147,10 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
           openMenu={openMenu}
           paused={paused}
           onClear={onClear}
+          onJumpToLatest={jumpToLatest}
           onPause={onPause}
           onToggleMenu={setOpenMenu}
+          followingLatest={followingLatest}
         />
         {openMenu === "channels" && <ChannelEditor channels={channels} latestValues={latestValues} onChange={onChannelsChange} />}
         {openMenu === "settings" && <SettingsMenu settings={settings} onChange={setSettings} />}
@@ -202,12 +218,14 @@ function WaveHover({ point }: { point: HoverPoint }) {
   </div>;
 }
 
-function WaveToolbar({ channelCount, connected, openMenu, paused, onClear, onPause, onToggleMenu }: {
+function WaveToolbar({ channelCount, connected, followingLatest, openMenu, paused, onClear, onJumpToLatest, onPause, onToggleMenu }: {
   channelCount: number;
   connected: boolean;
+  followingLatest: boolean;
   openMenu: OpenMenu;
   paused: boolean;
   onClear: () => void;
+  onJumpToLatest: () => void;
   onPause: () => void;
   onToggleMenu: Dispatch<SetStateAction<OpenMenu>>;
 }) {
@@ -215,6 +233,7 @@ function WaveToolbar({ channelCount, connected, openMenu, paused, onClear, onPau
     <div><h2>波形监视器</h2><p>RX 名称=数值 · 手动通道配置</p></div>
     <div className="wave-actions">
       <button type="button" className={"wave-action " + (openMenu === "channels" ? "active" : "")} title="配置波形通道" aria-label="配置波形通道" aria-expanded={openMenu === "channels"} onClick={() => toggleMenu("channels", onToggleMenu)}><Icon name="channels" /><b>{channelCount}</b></button>
+      <button type="button" className={"wave-action " + (followingLatest ? "active" : "")} title="跳到最新数据并持续跟随" aria-label="跳到最新数据并持续跟随" aria-pressed={followingLatest} onClick={onJumpToLatest}><Icon name="arrowRight" /></button>
       <button type="button" className={"wave-action " + (paused ? "active" : "")} title={paused ? "继续波形显示" : "暂停波形显示"} aria-label={paused ? "继续波形显示" : "暂停波形显示"} aria-pressed={paused} onClick={onPause}><Icon name={paused ? "play" : "pause"} /></button>
       <button type="button" className="wave-action" title="清空波形数据" aria-label="清空波形数据" onClick={onClear}><Icon name="trash" /></button>
       <button type="button" className={"wave-action " + (openMenu === "settings" ? "active" : "")} title="波形显示设置" aria-label="波形显示设置" aria-expanded={openMenu === "settings"} onClick={() => toggleMenu("settings", onToggleMenu)}><Icon name="settings" /></button>

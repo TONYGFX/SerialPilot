@@ -8,6 +8,7 @@ import type { SVGProps } from "react";
 
 export type IconName =
   | "arrowDown"
+  | "arrowRight"
   | "channels"
   | "chevronDown"
   | "chevronUp"
@@ -29,6 +30,7 @@ type IconProps = Omit<SVGProps<SVGSVGElement>, "children"> & {
 
 const ICON_PATHS: Record<IconName, JSX.Element> = {
   arrowDown: <><path d="M9 3v9M5.5 8.5 9 12l3.5-3.5M4 14h10" /></>,
+  arrowRight: <><path d="M3 8.5h9M8.5 5 12 8.5 8.5 12M14 4v9" /></>,
   channels: <><path d="M3 4h10M3 8h10M3 12h10" /><circle cx="15.5" cy="4" r=".8" fill="currentColor" stroke="none" /><circle cx="15.5" cy="8" r=".8" fill="currentColor" stroke="none" /><circle cx="15.5" cy="12" r=".8" fill="currentColor" stroke="none" /></>,
   chevronDown: <path d="m5 7 4 4 4-4" />,
   chevronUp: <path d="m5 11 4-4 4 4" />,
