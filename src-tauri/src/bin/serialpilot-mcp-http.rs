@@ -1,54 +1,35 @@
-//! Streamable HTTP transport for MCP. The endpoint is separate from Tauri UI traffic.
+//! Standalone Streamable HTTP transport for MCP development and integration.
 
-use std::{net::SocketAddr, sync::Arc};
+use std::sync::Arc;
 
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::IntoResponse,
-    routing::{get, post},
-    Json, Router,
-};
-use serde_json::{json, Value};
-use serialpilot_lib::{command::SerialCore, mcp::handle_request, serial::MockSerialAdapter};
-
-#[derive(Clone)]
-struct McpState(Arc<SerialCore>);
+use serialpilot_lib::{command::SerialCore, mcp_http::McpHttpServer, serial::MockSerialAdapter};
 
 #[tokio::main]
 async fn main() {
-    let state = McpState(Arc::new(SerialCore::new(Arc::new(MockSerialAdapter))));
-    let app = Router::new()
-        .route("/mcp", post(mcp))
-        .route("/health", get(health))
-        .with_state(state);
-    let address: SocketAddr = std::env::var("SERIALPILOT_MCP_ADDR")
-        .unwrap_or_else(|_| "127.0.0.1:3030".into())
-        .parse()
-        .unwrap_or_else(|error| {
-            eprintln!("invalid SERIALPILOT_MCP_ADDR: {error}");
-            std::process::exit(2);
-        });
-    eprintln!("SerialPilot MCP Streamable HTTP (Mock adapter) listening on http://{address}/mcp");
-    let listener = match tokio::net::TcpListener::bind(address).await {
-        Ok(listener) => listener,
+    let port = match http_port() {
+        Ok(port) => port,
         Err(error) => {
-            eprintln!("failed to bind MCP HTTP address: {error}");
+            eprintln!("{error}");
+            std::process::exit(2);
+        }
+    };
+    let core = Arc::new(SerialCore::new(Arc::new(MockSerialAdapter)));
+    let server = match McpHttpServer::start(core, port).await {
+        Ok(server) => server,
+        Err(error) => {
+            eprintln!("failed to start MCP HTTP server: {error}");
             return;
         }
     };
-    if let Err(error) = axum::serve(listener, app).await {
-        eprintln!("MCP HTTP server failed: {error}");
-    }
+    let endpoint = server.status().endpoint.unwrap_or_default();
+    eprintln!("SerialPilot MCP Streamable HTTP (Mock adapter) listening on {endpoint}");
+    std::future::pending::<()>().await;
 }
 
-async fn health() -> impl IntoResponse {
-    (StatusCode::OK, Json(json!({ "status": "ok" })))
-}
-
-async fn mcp(State(state): State<McpState>, Json(request): Json<Value>) -> impl IntoResponse {
-    match handle_request(&state.0, request).await {
-        Some(response) => (StatusCode::OK, Json(response)),
-        None => (StatusCode::NO_CONTENT, Json(Value::Null)),
-    }
+fn http_port() -> Result<u16, String> {
+    std::env::var("SERIALPILOT_MCP_ADDR")
+        .unwrap_or_else(|_| "127.0.0.1:3030".into())
+        .parse::<std::net::SocketAddr>()
+        .map(|address| address.port())
+        .map_err(|error| format!("SERIALPILOT_MCP_ADDR must be host:port: {error}"))
 }

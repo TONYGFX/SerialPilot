@@ -40,6 +40,8 @@ cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
+Use the `MCP` status button in the desktop title bar to open MCP settings. Its gray/green status dot shows whether the loopback-only HTTP service is stopped or running. The service lives inside the desktop process; its tool calls use the same serial core, current session, RX buffer, and event stream as the UI.
+
 For a standalone MCP process using the Mock adapter:
 
 ```bash

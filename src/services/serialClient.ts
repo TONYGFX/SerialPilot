@@ -4,6 +4,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import type { McpHttpPreferences, McpHttpStatus } from "../types/settings";
 
 /**
  * Executes one structured serial command through the Rust command dispatcher.
@@ -14,4 +15,15 @@ import { invoke } from "@tauri-apps/api/core";
  */
 export async function executeSerialCommand<Result>(command: unknown): Promise<Result> {
   return invoke<Result>("execute_serial", { command });
+}
+
+/**
+ * Starts, restarts, or stops the loopback-only MCP HTTP service in the desktop process.
+ *
+ * @param config Persisted local MCP transport preferences.
+ * @returns The live endpoint after the runtime operation finishes.
+ * @throws Rejects when the configured port cannot be bound.
+ */
+export async function configureMcpHttp(config: McpHttpPreferences): Promise<McpHttpStatus> {
+  return invoke<McpHttpStatus>("configure_mcp_http", { config });
 }
