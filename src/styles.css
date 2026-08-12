@@ -227,7 +227,7 @@ select, input:not([type="checkbox"]) { height: 31px; padding: 0 8px; }
 .check input:checked { border-color: #3e9d61; background: #50bd78; }
 .check input:checked::after { display: block; color: #07150b; content: "✓"; font-size: 13px; font-weight: 800; line-height: 14px; text-align: center; }
 .check input:focus-visible { box-shadow: 0 0 0 2px rgb(80 185 119 / 28%); }
-.timed-send-control { display: grid; grid-template-columns: minmax(0, 1fr) 96px; align-items: end; gap: 8px; }
+.timed-send-control { display: flex; align-items: end; justify-content: flex-start; gap: 12px; min-width: 0; }
 .timed-send-control .check { min-width: 0; margin: 0 0 7px; }
 .timed-send-interval { min-width: 0; margin: 0; }
 .primary, .danger { min-height: 33px; border: 0; border-radius: 2px; font-size: 11px; font-weight: 700; }
