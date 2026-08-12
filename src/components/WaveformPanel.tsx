@@ -11,8 +11,10 @@ import {
   useState,
   type Dispatch,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type RefObject,
   type SetStateAction,
+  type WheelEvent as ReactWheelEvent,
 } from "react";
 import { Icon } from "./Icon";
 import { buildWaveChart, formatWaveValue, limitSamplesPerChannel } from "../lib/waveform";
@@ -36,6 +38,8 @@ const DEFAULT_SETTINGS: WaveformSettings = {
 };
 
 const CHANNEL_COLORS = ["#61d792", "#5fc7dd", "#e8ba61", "#df7aa4", "#a8a6ee", "#d9935d"];
+const WAVE_AXIS_WIDTH = 58;
+const WAVE_TOOLBAR_HEIGHT = 54;
 
 /**
  * Draws configured channels using an aspect-correct SVG viewport.
@@ -49,18 +53,60 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
   const [hover, setHover] = useState<HoverPoint>();
   const [settings, setSettings] = useState<WaveformSettings>(DEFAULT_SETTINGS);
   const [openMenu, setOpenMenu] = useState<OpenMenu>();
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [dragging, setDragging] = useState(false);
+  const drag = useRef<{ startX: number; startY: number; originX: number; originY: number }>();
   const visibleSamples = useVisibleSamples(samples, channels, settings.samplesPerChannel);
   const viewport = useMeasuredViewport(plot, visibleSamples.length, settings.samplesPerChannel, channels.length);
-  const chart = useMemo(() => buildWaveChart(visibleSamples, channels, viewport), [visibleSamples, channels, viewport]);
+  const chart = useMemo(() => buildWaveChart(visibleSamples, channels, { width: viewport.contentWidth, height: viewport.contentHeight }), [visibleSamples, channels, viewport.contentWidth, viewport.contentHeight]);
+  const panBounds = useMemo(() => ({
+    x: Math.max(0, chart.viewportWidth - viewport.width),
+    y: Math.max(0, chart.viewportHeight - viewport.height),
+  }), [chart.viewportHeight, chart.viewportWidth, viewport.height, viewport.width]);
   const latestValues = useMemo(() => getLatestValues(samples), [samples]);
+
+  useEffect(() => {
+    setPan((current) => clampPan(current, panBounds));
+  }, [panBounds]);
+
+  const updatePan = (x: number, y: number) => setPan(clampPan({ x, y }, panBounds));
+  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    drag.current = { startX: event.clientX, startY: event.clientY, originX: pan.x, originY: pan.y };
+    setDragging(true);
+  };
+  const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const currentDrag = drag.current;
+    if (!currentDrag) return;
+    updatePan(currentDrag.originX + event.clientX - currentDrag.startX, currentDrag.originY + event.clientY - currentDrag.startY);
+  };
+  const handlePointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    drag.current = undefined;
+    setDragging(false);
+  };
+  const handleWheel = (event: ReactWheelEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const horizontalDelta = event.shiftKey ? event.deltaY : event.deltaX;
+    const verticalDelta = event.shiftKey ? 0 : event.deltaY;
+    updatePan(pan.x - horizontalDelta, pan.y - verticalDelta);
+  };
 
   useDismissableMenu(toolbar, openMenu, () => setOpenMenu(undefined));
 
   return <section className="waveform">
     <div className="wave-plot" ref={plot}>
-      <div className="wave-scroll">
-        <div className="wave-canvas" style={{ width: chart.viewportWidth, height: chart.viewportHeight }}>
-          <WaveSvg chart={chart} plot={plot} showLatestMarker={settings.showLatestMarker} onHover={setHover} onLeave={() => setHover(undefined)} />
+      <div className="wave-surface">
+        <div className="wave-axis" aria-hidden="true">
+          <div className="wave-axis-content" style={{ width: WAVE_AXIS_WIDTH, height: chart.viewportHeight }}>
+            <WaveYAxis chart={chart} height={viewport.height} />
+          </div>
+        </div>
+        <div className={"wave-viewport " + (dragging ? "dragging" : "")} onWheel={handleWheel} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} onMouseLeave={() => setHover(undefined)}>
+          <div className="wave-pan-layer" style={{ width: chart.viewportWidth, height: chart.viewportHeight, transform: `translate(${pan.x}px, ${pan.y}px)` }}>
+            <WaveSvg chart={chart} plot={plot} showLatestMarker={settings.showLatestMarker} onHover={setHover} onLeave={() => setHover(undefined)} />
+          </div>
         </div>
       </div>
       {hover && <WaveHover point={hover} />}
@@ -87,6 +133,15 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
 
 type HoverPoint = { point: ReturnType<typeof buildWaveChart>["series"][number]["points"][number]; channel: WaveChannel; left: number; top: number };
 
+function WaveYAxis({ chart, height }: { chart: ReturnType<typeof buildWaveChart>; height: number }) {
+  return <svg className="wave-axis-svg" width={WAVE_AXIS_WIDTH} height={chart.viewportHeight} viewBox={`0 0 ${WAVE_AXIS_WIDTH} ${chart.viewportHeight}`} preserveAspectRatio="none">
+    {chart.horizontalGrid.map((line, index) => {
+      const visibleY = chart.top + index / Math.max(1, chart.horizontalGrid.length - 1) * Math.max(1, height - chart.top - 64);
+      return <text key={"axis-" + index} x={WAVE_AXIS_WIDTH - 8} y={visibleY + 4} className="wave-label" textAnchor="end">{line.label}</text>;
+    })}
+  </svg>;
+}
+
 function WaveSvg({ chart, plot, showLatestMarker, onHover, onLeave }: { chart: ReturnType<typeof buildWaveChart>; plot: RefObject<HTMLDivElement>; showLatestMarker: boolean; onHover: (hover: HoverPoint) => void; onLeave: () => void }) {
   const viewBox = "0 0 " + chart.viewportWidth + " " + chart.viewportHeight;
   const handleMove = (event: ReactMouseEvent<SVGSVGElement>) => {
@@ -101,7 +156,7 @@ function WaveSvg({ chart, plot, showLatestMarker, onHover, onLeave }: { chart: R
   };
   return <svg className="wave-svg" viewBox={viewBox} preserveAspectRatio="none" role="img" aria-label="配置通道的串口接收数据波形" onMouseMove={handleMove} onMouseLeave={onLeave}>
     <rect x={chart.left} y={chart.top} width={chart.plotWidth} height={chart.plotHeight} className="wave-frame" />
-    {chart.horizontalGrid.map((line, index) => <g key={"h-" + index}><line x1={chart.left} y1={line.y} x2={chart.right} y2={line.y} className="wave-grid" /><text x={chart.left - 7} y={line.y + 4} className="wave-label" textAnchor="end">{line.label}</text></g>)}
+    {chart.horizontalGrid.map((line, index) => <line key={"h-" + index} x1={chart.left} y1={line.y} x2={chart.right} y2={line.y} className="wave-grid" />)}
     {chart.verticalGrid.map((x, index) => <line key={"v-" + index} x1={x} y1={chart.top} x2={x} y2={chart.bottom} className="wave-grid" />)}
     {chart.series.map((series) => <path key={series.channel.id} d={series.path} className="wave-line" style={{ stroke: series.channel.color }} />)}
     {showLatestMarker && chart.series.map((series) => series.lastPoint && <circle key={"point-" + series.channel.id} cx={series.lastPoint.x} cy={series.lastPoint.y} r="4.5" className="wave-point" style={{ fill: series.channel.color, stroke: series.channel.color }} />)}
@@ -199,7 +254,7 @@ function useVisibleSamples(samples: WaveSample[], channels: WaveChannel[], sampl
 }
 
 function useMeasuredViewport(plot: RefObject<HTMLDivElement>, sampleCount: number, samplesPerChannel: number, channelCount: number) {
-  const [viewport, setViewport] = useState({ width: 1000, height: 560 });
+  const [viewport, setViewport] = useState({ width: 900, height: 500, contentWidth: 1000, contentHeight: 560 });
   useEffect(() => {
     const element = plot.current;
     if (!element) return;
@@ -212,12 +267,18 @@ function useMeasuredViewport(plot: RefObject<HTMLDivElement>, sampleCount: numbe
   return viewport;
 }
 
-function setViewportFromElement(element: HTMLDivElement, setViewport: Dispatch<SetStateAction<{ width: number; height: number }>>, sampleCount: number, samplesPerChannel: number, channelCount: number) {
+function setViewportFromElement(element: HTMLDivElement, setViewport: Dispatch<SetStateAction<{ width: number; height: number; contentWidth: number; contentHeight: number }>>, sampleCount: number, samplesPerChannel: number, channelCount: number) {
   const bounds = element.getBoundingClientRect();
-  const minimumWidth = Math.max(900, samplesPerChannel * 4 + 120, sampleCount * 4 + 120);
-  const minimumHeight = Math.max(560, channelCount * 70 + 420);
-  const next = { width: Math.max(1, Math.round(bounds.width), minimumWidth), height: Math.max(1, Math.round(bounds.height), minimumHeight) };
-  setViewport((current) => current.width === next.width && current.height === next.height ? current : next);
+  const width = Math.max(1, Math.round(bounds.width) - WAVE_AXIS_WIDTH);
+  const height = Math.max(1, Math.round(bounds.height) - WAVE_TOOLBAR_HEIGHT);
+  const contentWidth = Math.max(width, 900, samplesPerChannel * 4 + 120, sampleCount * 4 + 120);
+  const contentHeight = Math.max(height, 560, channelCount * 70 + 420);
+  const next = { width, height, contentWidth, contentHeight };
+  setViewport((current) => current.width === next.width && current.height === next.height && current.contentWidth === next.contentWidth && current.contentHeight === next.contentHeight ? current : next);
+}
+
+function clampPan(pan: { x: number; y: number }, bounds: { x: number; y: number }) {
+  return { x: Math.min(0, Math.max(-bounds.x, pan.x)), y: Math.min(0, Math.max(-bounds.y, pan.y)) };
 }
 
 function useDismissableMenu(root: RefObject<HTMLDivElement>, openMenu: OpenMenu, dismiss: () => void) {

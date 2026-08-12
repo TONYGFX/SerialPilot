@@ -357,15 +357,20 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .wave-option-group { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
 .wave-option-group button { min-height: 26px; border: 1px solid #35434a; background: #1d292d; color: #9eb0b4; font: 10px ui-monospace, monospace; }
 .wave-option-group button:hover, .wave-option-group button.selected { border-color: #50b977; background: #263f31; color: #c6e8d0; }
-.wave-meta { position: absolute; z-index: 2; top: 76px; left: 18px; display: flex; align-items: center; gap: 16px; min-height: 28px; padding: 0 9px; border: 1px solid rgb(64 80 88 / 65%); border-radius: 2px; background: rgb(16 22 24 / 82%); color: #819198; font-size: 10px; }
+.wave-meta { position: absolute; z-index: 2; top: 76px; left: 72px; display: flex; align-items: center; gap: 16px; min-height: 28px; padding: 0 9px; border: 1px solid rgb(64 80 88 / 65%); border-radius: 2px; background: rgb(16 22 24 / 82%); color: #819198; font-size: 10px; pointer-events: none; }
 .wave-meta strong { margin-left: 4px; color: #dce9e3; font: 11px ui-monospace, monospace; }
-.wave-legend { position: absolute; z-index: 2; top: 76px; right: 18px; display: flex; align-items: center; gap: 10px; max-width: 52%; min-height: 28px; padding: 0 9px; border: 1px solid rgb(64 80 88 / 65%); border-radius: 2px; background: rgb(16 22 24 / 82%); color: #a5b5b8; font-size: 10px; }
+.wave-legend { position: absolute; z-index: 2; top: 76px; right: 18px; display: flex; align-items: center; gap: 10px; max-width: 52%; min-height: 28px; padding: 0 9px; border: 1px solid rgb(64 80 88 / 65%); border-radius: 2px; background: rgb(16 22 24 / 82%); color: #a5b5b8; font-size: 10px; pointer-events: none; }
 .wave-legend-item { display: inline-flex; align-items: center; min-width: 0; max-width: 150px; gap: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wave-legend-item i { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; }
 .wave-plot { position: relative; width: 100%; height: 100%; min-height: 0; overflow: hidden; background: #101618; }
-.wave-scroll { width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: auto; scrollbar-gutter: stable both-edges; }
-.wave-canvas { position: relative; min-width: 0; min-height: 0; }
-.wave-svg { display: block; width: 100%; height: 100%; min-height: 0; cursor: crosshair; }
+.wave-surface { position: absolute; top: 54px; right: 0; bottom: 0; left: 0; display: grid; grid-template-columns: 58px minmax(0, 1fr); min-width: 0; min-height: 0; }
+.wave-axis { position: relative; min-width: 0; min-height: 0; overflow: hidden; border-right: 1px solid #35434a; background: #101618; }
+.wave-axis-content { position: absolute; top: 0; left: 0; will-change: transform; }
+.wave-axis-svg { display: block; overflow: visible; }
+.wave-viewport { position: relative; min-width: 0; min-height: 0; overflow: hidden; touch-action: none; cursor: grab; }
+.wave-viewport.dragging { cursor: grabbing; }
+.wave-pan-layer { position: absolute; top: 0; left: 0; will-change: transform; }
+.wave-svg { display: block; width: 100%; height: 100%; min-height: 0; cursor: inherit; }
 .wave-hover { position: absolute; z-index: 5; display: grid; gap: 3px; min-width: 138px; padding: 7px 9px; border: 1px solid #46615a; border-radius: 2px; background: rgb(13 21 20 / 94%); box-shadow: 0 6px 18px rgb(0 0 0 / 30%); color: #b8c8c5; font: 10px ui-monospace, monospace; pointer-events: none; }
 .wave-hover strong { font-size: 11px; }
 .wave-frame { fill: #11191c; stroke: #35434a; stroke-width: 1; }
@@ -373,8 +378,8 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .wave-label { fill: #829299; font: 12px ui-monospace, monospace; }
 .wave-line { fill: none; stroke: #61d792; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
 .wave-point { fill: #b7f3cd; stroke: #61d792; stroke-width: 2; }
-.wave-empty { position: absolute; z-index: 1; top: 50%; left: 50%; margin: 0; color: #718189; font-size: 12px; transform: translate(-50%, -50%); }
-.wave-footer { position: absolute; z-index: 2; right: 18px; bottom: 10px; left: 18px; display: flex; align-items: center; justify-content: space-between; min-height: 24px; padding: 0 8px; border-top: 1px solid rgb(64 80 88 / 65%); background: rgb(16 22 24 / 72%); color: #718189; font-size: 10px; }
+.wave-empty { position: absolute; z-index: 1; top: 50%; left: 50%; margin: 0; color: #718189; font-size: 12px; pointer-events: none; transform: translate(-50%, -50%); }
+.wave-footer { position: absolute; z-index: 2; right: 18px; bottom: 10px; left: 18px; display: flex; align-items: center; justify-content: space-between; min-height: 24px; padding: 0 8px; border-top: 1px solid rgb(64 80 88 / 65%); background: rgb(16 22 24 / 72%); color: #718189; font-size: 10px; pointer-events: none; }
 
 @media (max-width: 1050px) {
   .workspace { grid-template-columns: var(--settings-width, 220px) 1px minmax(0, 1fr); }
@@ -384,7 +389,7 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
   .wave-toolbar { align-items: flex-start; gap: 10px; }
   .wave-actions { flex-wrap: wrap; justify-content: flex-end; }
   .wave-state { display: none; }
-  .wave-meta { max-width: calc(100% - 36px); gap: 9px; overflow: hidden; white-space: nowrap; }
+  .wave-meta { left: 72px; max-width: calc(100% - 90px); gap: 9px; overflow: hidden; white-space: nowrap; }
   .wave-footer span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 
@@ -463,6 +468,7 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .app-shell[data-theme="light"] .receive-display-picker button { border-color: #bdcbcf; background: #f2f6f7; color: #536a71; }
 .app-shell[data-theme="light"] .receive-display-picker button:hover, .app-shell[data-theme="light"] .receive-display-picker button.selected { background: #e7f5eb; color: #1e7044; }
 .app-shell[data-theme="light"] .wave-plot { background: #f8fbfb; }
+.app-shell[data-theme="light"] .wave-axis { border-color: #b9c7cb; background: #f8fbfb; }
 .app-shell[data-theme="light"] .wave-hover { border-color: #9db9a6; background: rgb(255 255 255 / 96%); color: #405a62; box-shadow: 0 6px 18px rgb(36 56 63 / 17%); }
 .app-shell[data-theme="light"] .wave-frame { fill: #fbfdfd; stroke: #b9c7cb; }
 .app-shell[data-theme="light"] .wave-grid { stroke: #aebfc3; }
