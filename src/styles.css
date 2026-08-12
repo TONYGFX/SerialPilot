@@ -363,7 +363,11 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .wave-legend-item { display: inline-flex; align-items: center; min-width: 0; max-width: 150px; gap: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wave-legend-item i { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; }
 .wave-plot { position: relative; width: 100%; height: 100%; min-height: 0; overflow: hidden; background: #101618; }
-.wave-svg { display: block; width: 100%; height: 100%; min-height: 0; }
+.wave-scroll { width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: auto; scrollbar-gutter: stable both-edges; }
+.wave-canvas { position: relative; min-width: 0; min-height: 0; }
+.wave-svg { display: block; width: 100%; height: 100%; min-height: 0; cursor: crosshair; }
+.wave-hover { position: absolute; z-index: 5; display: grid; gap: 3px; min-width: 138px; padding: 7px 9px; border: 1px solid #46615a; border-radius: 2px; background: rgb(13 21 20 / 94%); box-shadow: 0 6px 18px rgb(0 0 0 / 30%); color: #b8c8c5; font: 10px ui-monospace, monospace; pointer-events: none; }
+.wave-hover strong { font-size: 11px; }
 .wave-frame { fill: #11191c; stroke: #35434a; stroke-width: 1; }
 .wave-grid { stroke: #405058; stroke-width: 1; stroke-dasharray: 1 7; }
 .wave-label { fill: #829299; font: 12px ui-monospace, monospace; }
@@ -459,6 +463,7 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .app-shell[data-theme="light"] .receive-display-picker button { border-color: #bdcbcf; background: #f2f6f7; color: #536a71; }
 .app-shell[data-theme="light"] .receive-display-picker button:hover, .app-shell[data-theme="light"] .receive-display-picker button.selected { background: #e7f5eb; color: #1e7044; }
 .app-shell[data-theme="light"] .wave-plot { background: #f8fbfb; }
+.app-shell[data-theme="light"] .wave-hover { border-color: #9db9a6; background: rgb(255 255 255 / 96%); color: #405a62; box-shadow: 0 6px 18px rgb(36 56 63 / 17%); }
 .app-shell[data-theme="light"] .wave-frame { fill: #fbfdfd; stroke: #b9c7cb; }
 .app-shell[data-theme="light"] .wave-grid { stroke: #aebfc3; }
 .app-shell[data-theme="light"] .wave-label { fill: #647b83; }

@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
   type Dispatch,
+  type MouseEvent as ReactMouseEvent,
   type RefObject,
   type SetStateAction,
 } from "react";
@@ -45,10 +46,11 @@ const CHANNEL_COLORS = ["#61d792", "#5fc7dd", "#e8ba61", "#df7aa4", "#a8a6ee", "
 export function WaveformPanel({ samples, channels, connected, paused, onPause, onClear, onChannelsChange }: WaveformPanelProps) {
   const plot = useRef<HTMLDivElement>(null);
   const toolbar = useRef<HTMLDivElement>(null);
-  const viewport = useMeasuredViewport(plot);
+  const [hover, setHover] = useState<HoverPoint>();
   const [settings, setSettings] = useState<WaveformSettings>(DEFAULT_SETTINGS);
   const [openMenu, setOpenMenu] = useState<OpenMenu>();
   const visibleSamples = useVisibleSamples(samples, channels, settings.samplesPerChannel);
+  const viewport = useMeasuredViewport(plot, visibleSamples.length, settings.samplesPerChannel, channels.length);
   const chart = useMemo(() => buildWaveChart(visibleSamples, channels, viewport), [visibleSamples, channels, viewport]);
   const latestValues = useMemo(() => getLatestValues(samples), [samples]);
 
@@ -56,7 +58,12 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
 
   return <section className="waveform">
     <div className="wave-plot" ref={plot}>
-      <WaveSvg chart={chart} showLatestMarker={settings.showLatestMarker} />
+      <div className="wave-scroll">
+        <div className="wave-canvas" style={{ width: chart.viewportWidth, height: chart.viewportHeight }}>
+          <WaveSvg chart={chart} plot={plot} showLatestMarker={settings.showLatestMarker} onHover={setHover} onLeave={() => setHover(undefined)} />
+        </div>
+      </div>
+      {hover && <WaveHover point={hover} />}
       {chart.series.length === 0 && <p className="wave-empty">{getEmptyMessage(connected, channels)}</p>}
       <div className="wave-overlay" ref={toolbar}>
         <WaveToolbar
@@ -78,9 +85,21 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
   </section>;
 }
 
-function WaveSvg({ chart, showLatestMarker }: { chart: ReturnType<typeof buildWaveChart>; showLatestMarker: boolean }) {
+type HoverPoint = { point: ReturnType<typeof buildWaveChart>["series"][number]["points"][number]; channel: WaveChannel; left: number; top: number };
+
+function WaveSvg({ chart, plot, showLatestMarker, onHover, onLeave }: { chart: ReturnType<typeof buildWaveChart>; plot: RefObject<HTMLDivElement>; showLatestMarker: boolean; onHover: (hover: HoverPoint) => void; onLeave: () => void }) {
   const viewBox = "0 0 " + chart.viewportWidth + " " + chart.viewportHeight;
-  return <svg className="wave-svg" viewBox={viewBox} preserveAspectRatio="none" role="img" aria-label="配置通道的串口接收数据波形">
+  const handleMove = (event: ReactMouseEvent<SVGSVGElement>) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const x = (event.clientX - bounds.left) * chart.viewportWidth / bounds.width;
+    const y = (event.clientY - bounds.top) * chart.viewportHeight / bounds.height;
+    const nearest = findNearestPoint(chart, x, y);
+    if (!nearest) return onLeave();
+    const plotBounds = plot.current?.getBoundingClientRect();
+    if (!plotBounds) return onLeave();
+    onHover({ ...nearest, left: event.clientX - plotBounds.left, top: event.clientY - plotBounds.top });
+  };
+  return <svg className="wave-svg" viewBox={viewBox} preserveAspectRatio="none" role="img" aria-label="配置通道的串口接收数据波形" onMouseMove={handleMove} onMouseLeave={onLeave}>
     <rect x={chart.left} y={chart.top} width={chart.plotWidth} height={chart.plotHeight} className="wave-frame" />
     {chart.horizontalGrid.map((line, index) => <g key={"h-" + index}><line x1={chart.left} y1={line.y} x2={chart.right} y2={line.y} className="wave-grid" /><text x={chart.left - 7} y={line.y + 4} className="wave-label" textAnchor="end">{line.label}</text></g>)}
     {chart.verticalGrid.map((x, index) => <line key={"v-" + index} x1={x} y1={chart.top} x2={x} y2={chart.bottom} className="wave-grid" />)}
@@ -88,6 +107,29 @@ function WaveSvg({ chart, showLatestMarker }: { chart: ReturnType<typeof buildWa
     {showLatestMarker && chart.series.map((series) => series.lastPoint && <circle key={"point-" + series.channel.id} cx={series.lastPoint.x} cy={series.lastPoint.y} r="4.5" className="wave-point" style={{ fill: series.channel.color, stroke: series.channel.color }} />)}
     <text x={chart.left} y={chart.labelBaseline} className="wave-label">最早</text><text x={chart.right} y={chart.labelBaseline} className="wave-label" textAnchor="end">最新</text>
   </svg>;
+}
+
+function findNearestPoint(chart: ReturnType<typeof buildWaveChart>, x: number, y: number): { point: HoverPoint["point"]; channel: WaveChannel } | undefined {
+  let nearest: { point: HoverPoint["point"]; channel: WaveChannel; distance: number } | undefined;
+  for (const series of chart.series) {
+    for (const point of series.points) {
+      const distance = Math.hypot(point.x - x, point.y - y);
+      if (distance > 22 || (nearest && distance >= nearest.distance)) continue;
+      nearest = { point, channel: series.channel, distance };
+    }
+  }
+  return nearest;
+}
+
+function WaveHover({ point }: { point: HoverPoint }) {
+  const left = Math.min(Math.max(point.left + 14, 12), 420);
+  const top = Math.max(point.top - 74, 74);
+  return <div className="wave-hover" style={{ left, top }}>
+    <strong style={{ color: point.channel.color }}>{point.channel.name}</strong>
+    <span>值 {formatWaveValue(point.point.sample.value)}</span>
+    <span>时间 {new Date(point.point.sample.timestampMs).toLocaleTimeString()}</span>
+    <span>游标 #{point.point.sample.cursor}</span>
+  </div>;
 }
 
 function WaveToolbar({ channelCount, connected, openMenu, paused, onClear, onPause, onToggleMenu }: {
@@ -156,23 +198,25 @@ function useVisibleSamples(samples: WaveSample[], channels: WaveChannel[], sampl
   }, [channels, samples, samplesPerChannel]);
 }
 
-function useMeasuredViewport(plot: RefObject<HTMLDivElement>) {
+function useMeasuredViewport(plot: RefObject<HTMLDivElement>, sampleCount: number, samplesPerChannel: number, channelCount: number) {
   const [viewport, setViewport] = useState({ width: 1000, height: 560 });
   useEffect(() => {
     const element = plot.current;
     if (!element) return;
-    const update = () => setViewportFromElement(element, setViewport);
+    const update = () => setViewportFromElement(element, setViewport, sampleCount, samplesPerChannel, channelCount);
     update();
     const observer = new ResizeObserver(update);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [plot]);
+  }, [plot, sampleCount, samplesPerChannel, channelCount]);
   return viewport;
 }
 
-function setViewportFromElement(element: HTMLDivElement, setViewport: Dispatch<SetStateAction<{ width: number; height: number }>>) {
+function setViewportFromElement(element: HTMLDivElement, setViewport: Dispatch<SetStateAction<{ width: number; height: number }>>, sampleCount: number, samplesPerChannel: number, channelCount: number) {
   const bounds = element.getBoundingClientRect();
-  const next = { width: Math.max(1, Math.round(bounds.width)), height: Math.max(1, Math.round(bounds.height)) };
+  const minimumWidth = Math.max(900, samplesPerChannel * 4 + 120, sampleCount * 4 + 120);
+  const minimumHeight = Math.max(560, channelCount * 70 + 420);
+  const next = { width: Math.max(1, Math.round(bounds.width), minimumWidth), height: Math.max(1, Math.round(bounds.height), minimumHeight) };
   setViewport((current) => current.width === next.width && current.height === next.height ? current : next);
 }
 

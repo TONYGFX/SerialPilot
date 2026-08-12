@@ -9,11 +9,12 @@ import type { WaveChannel, WaveSample } from "../types/waveform";
 
 export type ChartViewport = { width: number; height: number };
 
-type ChartPoint = { x: number; y: number };
+export type ChartPoint = { x: number; y: number; sample: WaveSample };
 
 export type WaveChartSeries = {
   channel: WaveChannel;
   path: string;
+  points: ChartPoint[];
   lastPoint?: ChartPoint;
 };
 
@@ -157,6 +158,7 @@ function createChartSeries(samples: WaveSample[], channel: WaveChannel, min: num
   const points = samples.map((sample) => sampleToPoint(sample, min, max, cursorRange, geometry));
   return {
     channel,
+    points,
     path: points.map((point, index) => (index === 0 ? "M" : "L") + point.x.toFixed(2) + "," + point.y.toFixed(2)).join(" "),
     lastPoint: points.at(-1),
   };
@@ -166,6 +168,7 @@ function sampleToPoint(sample: WaveSample, min: number, max: number, cursorRange
   const cursorSpan = cursorRange.last - cursorRange.first;
   const progress = cursorSpan > 0 ? (sample.cursor - cursorRange.first) / cursorSpan : 0.5;
   return {
+    sample,
     x: geometry.left + progress * geometry.plotWidth,
     y: geometry.top + (max - sample.value) / (max - min) * geometry.plotHeight,
   };
