@@ -1,0 +1,217 @@
+/**
+ * Renders the configured waveform workspace and its channel editor.
+ * The component only displays samples derived from RX events; channel rules
+ * are passed back to the serial-session hook for deterministic capture.
+ */
+
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type RefObject,
+  type SetStateAction,
+} from "react";
+import { Icon } from "./Icon";
+import { buildWaveChart, formatWaveValue, limitSamplesPerChannel } from "../lib/waveform";
+import type { WaveChannel, WaveSample, WaveformSettings } from "../types/waveform";
+
+type WaveformPanelProps = {
+  samples: WaveSample[];
+  channels: WaveChannel[];
+  connected: boolean;
+  paused: boolean;
+  onPause: () => void;
+  onClear: () => void;
+  onChannelsChange: (channels: WaveChannel[]) => void;
+};
+
+type OpenMenu = "channels" | "settings" | undefined;
+
+const DEFAULT_SETTINGS: WaveformSettings = {
+  samplesPerChannel: 240,
+  showLatestMarker: true,
+};
+
+const CHANNEL_COLORS = ["#61d792", "#5fc7dd", "#e8ba61", "#df7aa4", "#a8a6ee", "#d9935d"];
+
+/**
+ * Draws configured channels using an aspect-correct SVG viewport.
+ *
+ * @param props Channel configuration, serial-derived samples and user actions.
+ * @returns The waveform workspace panel.
+ */
+export function WaveformPanel({ samples, channels, connected, paused, onPause, onClear, onChannelsChange }: WaveformPanelProps) {
+  const plot = useRef<HTMLDivElement>(null);
+  const toolbar = useRef<HTMLDivElement>(null);
+  const viewport = useMeasuredViewport(plot);
+  const [settings, setSettings] = useState<WaveformSettings>(DEFAULT_SETTINGS);
+  const [openMenu, setOpenMenu] = useState<OpenMenu>();
+  const visibleSamples = useVisibleSamples(samples, channels, settings.samplesPerChannel);
+  const chart = useMemo(() => buildWaveChart(visibleSamples, channels, viewport), [visibleSamples, channels, viewport]);
+  const latestValues = useMemo(() => getLatestValues(samples), [samples]);
+
+  useDismissableMenu(toolbar, openMenu, () => setOpenMenu(undefined));
+
+  return <section className="waveform">
+    <div className="wave-plot" ref={plot}>
+      <WaveSvg chart={chart} showLatestMarker={settings.showLatestMarker} />
+      {chart.series.length === 0 && <p className="wave-empty">{getEmptyMessage(connected, channels)}</p>}
+      <div className="wave-overlay" ref={toolbar}>
+        <WaveToolbar
+          channelCount={channels.length}
+          connected={connected}
+          openMenu={openMenu}
+          paused={paused}
+          onClear={onClear}
+          onPause={onPause}
+          onToggleMenu={setOpenMenu}
+        />
+        {openMenu === "channels" && <ChannelEditor channels={channels} latestValues={latestValues} onChange={onChannelsChange} />}
+        {openMenu === "settings" && <SettingsMenu settings={settings} onChange={setSettings} />}
+      </div>
+      <WaveMetadata channelCount={chart.series.length} chart={chart} sampleCount={visibleSamples.length} />
+      <WaveLegend chart={chart} />
+      <div className="wave-footer"><span>数据源：RX 名称=数值帧</span><span>每通道窗口：{settings.samplesPerChannel}</span></div>
+    </div>
+  </section>;
+}
+
+function WaveSvg({ chart, showLatestMarker }: { chart: ReturnType<typeof buildWaveChart>; showLatestMarker: boolean }) {
+  const viewBox = "0 0 " + chart.viewportWidth + " " + chart.viewportHeight;
+  return <svg className="wave-svg" viewBox={viewBox} preserveAspectRatio="none" role="img" aria-label="配置通道的串口接收数据波形">
+    <rect x={chart.left} y={chart.top} width={chart.plotWidth} height={chart.plotHeight} className="wave-frame" />
+    {chart.horizontalGrid.map((line, index) => <g key={"h-" + index}><line x1={chart.left} y1={line.y} x2={chart.right} y2={line.y} className="wave-grid" /><text x={chart.left - 7} y={line.y + 4} className="wave-label" textAnchor="end">{line.label}</text></g>)}
+    {chart.verticalGrid.map((x, index) => <line key={"v-" + index} x1={x} y1={chart.top} x2={x} y2={chart.bottom} className="wave-grid" />)}
+    {chart.series.map((series) => <path key={series.channel.id} d={series.path} className="wave-line" style={{ stroke: series.channel.color }} />)}
+    {showLatestMarker && chart.series.map((series) => series.lastPoint && <circle key={"point-" + series.channel.id} cx={series.lastPoint.x} cy={series.lastPoint.y} r="4.5" className="wave-point" style={{ fill: series.channel.color, stroke: series.channel.color }} />)}
+    <text x={chart.left} y={chart.labelBaseline} className="wave-label">最早</text><text x={chart.right} y={chart.labelBaseline} className="wave-label" textAnchor="end">最新</text>
+  </svg>;
+}
+
+function WaveToolbar({ channelCount, connected, openMenu, paused, onClear, onPause, onToggleMenu }: {
+  channelCount: number;
+  connected: boolean;
+  openMenu: OpenMenu;
+  paused: boolean;
+  onClear: () => void;
+  onPause: () => void;
+  onToggleMenu: Dispatch<SetStateAction<OpenMenu>>;
+}) {
+  return <div className="wave-toolbar">
+    <div><h2>波形监视器</h2><p>RX 名称=数值 · 手动通道配置</p></div>
+    <div className="wave-actions">
+      <button type="button" className={"wave-action " + (openMenu === "channels" ? "active" : "")} title="配置波形通道" aria-label="配置波形通道" aria-expanded={openMenu === "channels"} onClick={() => toggleMenu("channels", onToggleMenu)}><Icon name="channels" /><b>{channelCount}</b></button>
+      <button type="button" className={"wave-action " + (paused ? "active" : "")} title={paused ? "继续波形显示" : "暂停波形显示"} aria-label={paused ? "继续波形显示" : "暂停波形显示"} aria-pressed={paused} onClick={onPause}><Icon name={paused ? "play" : "pause"} /></button>
+      <button type="button" className="wave-action" title="清空波形数据" aria-label="清空波形数据" onClick={onClear}><Icon name="trash" /></button>
+      <button type="button" className={"wave-action " + (openMenu === "settings" ? "active" : "")} title="波形显示设置" aria-label="波形显示设置" aria-expanded={openMenu === "settings"} onClick={() => toggleMenu("settings", onToggleMenu)}><Icon name="settings" /></button>
+      <span className={"wave-state " + (connected ? "online" : "")}>{paused ? "已暂停" : connected ? "采集中" : "等待连接"}</span>
+    </div>
+  </div>;
+}
+
+function ChannelEditor({ channels, latestValues, onChange }: { channels: WaveChannel[]; latestValues: Map<string, number>; onChange: (channels: WaveChannel[]) => void }) {
+  return <div className="wave-popover channel-editor" role="dialog" aria-label="波形通道配置">
+    <div className="wave-popover-head"><strong>通道配置</strong><button type="button" onClick={() => onChange([...channels, createChannel(channels)])}>添加通道</button></div>
+    {channels.length === 0 ? <p className="wave-menu-empty">添加名称后，匹配的 RX 数值会绘制为波形。</p> : <div className="channel-editor-list">{channels.map((channel) => <ChannelEditorRow key={channel.id} channel={channel} latestValue={latestValues.get(channel.id)} onChange={onChange} channels={channels} />)}</div>}
+  </div>;
+}
+
+function ChannelEditorRow({ channel, channels, latestValue, onChange }: { channel: WaveChannel; channels: WaveChannel[]; latestValue?: number; onChange: (channels: WaveChannel[]) => void }) {
+  const update = (change: Partial<WaveChannel>) => onChange(channels.map((item) => item.id === channel.id ? { ...item, ...change } : item));
+  return <div className={"channel-editor-row " + (channel.enabled ? "" : "disabled")}>
+    <label className="channel-enabled" title={channel.enabled ? "停止采集此通道" : "开始采集此通道"}><input type="checkbox" checked={channel.enabled} onChange={(event) => update({ enabled: event.target.checked })} aria-label={channel.name + "启用状态"} /></label>
+    <input className="channel-color" type="color" value={channel.color} onChange={(event) => update({ color: event.target.value })} aria-label={channel.name + "线条颜色"} />
+    <input className="channel-name" type="text" value={channel.name} maxLength={24} onChange={(event) => update({ name: event.target.value })} aria-label="通道名称" placeholder="通道名称" />
+    <strong className="channel-latest">{latestValue === undefined ? "--" : formatWaveValue(latestValue)}</strong>
+    <button type="button" className="channel-remove" title="删除通道" aria-label="删除通道" onClick={() => onChange(channels.filter((item) => item.id !== channel.id))}><Icon name="trash" size={14} /></button>
+  </div>;
+}
+
+function SettingsMenu({ settings, onChange }: { settings: WaveformSettings; onChange: Dispatch<SetStateAction<WaveformSettings>> }) {
+  return <div className="wave-popover settings-menu" role="dialog" aria-label="波形显示设置">
+    <strong>显示设置</strong>
+    <span className="wave-menu-label">每通道样本</span>
+    <div className="wave-option-group">{[120, 240, 500].map((count) => <button type="button" key={count} className={settings.samplesPerChannel === count ? "selected" : ""} onClick={() => onChange((current) => ({ ...current, samplesPerChannel: count }))}>{count}</button>)}</div>
+    <button type="button" className={"wave-toggle-option " + (settings.showLatestMarker ? "selected" : "")} aria-pressed={settings.showLatestMarker} onClick={() => onChange((current) => ({ ...current, showLatestMarker: !current.showLatestMarker }))}>显示最新点</button>
+  </div>;
+}
+
+function WaveMetadata({ channelCount, chart, sampleCount }: { channelCount: number; chart: ReturnType<typeof buildWaveChart>; sampleCount: number }) {
+  return <div className="wave-meta"><span>通道 <strong>{channelCount}</strong></span><span>样本 {sampleCount}</span><span>范围 {chart.minLabel} - {chart.maxLabel}</span></div>;
+}
+
+function WaveLegend({ chart }: { chart: ReturnType<typeof buildWaveChart> }) {
+  if (chart.series.length === 0) return null;
+  return <div className="wave-legend" aria-label="波形通道图例">
+    {chart.series.map((series) => <span className="wave-legend-item" key={series.channel.id}><i style={{ backgroundColor: series.channel.color }} />{series.channel.name}</span>)}
+  </div>;
+}
+
+function useVisibleSamples(samples: WaveSample[], channels: WaveChannel[], samplesPerChannel: number): WaveSample[] {
+  return useMemo(() => {
+    const enabledIds = new Set(channels.filter((channel) => channel.enabled).map((channel) => channel.id));
+    return limitSamplesPerChannel(samples.filter((sample) => enabledIds.has(sample.channelId)), samplesPerChannel);
+  }, [channels, samples, samplesPerChannel]);
+}
+
+function useMeasuredViewport(plot: RefObject<HTMLDivElement>) {
+  const [viewport, setViewport] = useState({ width: 1000, height: 560 });
+  useEffect(() => {
+    const element = plot.current;
+    if (!element) return;
+    const update = () => setViewportFromElement(element, setViewport);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [plot]);
+  return viewport;
+}
+
+function setViewportFromElement(element: HTMLDivElement, setViewport: Dispatch<SetStateAction<{ width: number; height: number }>>) {
+  const bounds = element.getBoundingClientRect();
+  const next = { width: Math.max(1, Math.round(bounds.width)), height: Math.max(1, Math.round(bounds.height)) };
+  setViewport((current) => current.width === next.width && current.height === next.height ? current : next);
+}
+
+function useDismissableMenu(root: RefObject<HTMLDivElement>, openMenu: OpenMenu, dismiss: () => void) {
+  useEffect(() => {
+    if (!openMenu) return;
+    const dismissWhenOutside = (event: MouseEvent) => {
+      if (!root.current?.contains(event.target as Node)) dismiss();
+    };
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") dismiss();
+    };
+    document.addEventListener("mousedown", dismissWhenOutside);
+    document.addEventListener("keydown", dismissOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", dismissWhenOutside);
+      document.removeEventListener("keydown", dismissOnEscape);
+    };
+  }, [dismiss, openMenu, root]);
+}
+
+function createChannel(channels: WaveChannel[]): WaveChannel {
+  const color = CHANNEL_COLORS[channels.length % CHANNEL_COLORS.length];
+  return { id: crypto.randomUUID(), name: "X" + (channels.length + 1), color, enabled: true };
+}
+
+function getLatestValues(samples: WaveSample[]): Map<string, number> {
+  const latest = new Map<string, number>();
+  for (const sample of samples) latest.set(sample.channelId, sample.value);
+  return latest;
+}
+
+function getEmptyMessage(connected: boolean, channels: WaveChannel[]): string {
+  if (!connected) return "打开端口后开始采集";
+  if (channels.length === 0) return "请先在通道配置中添加通道";
+  if (!channels.some((channel) => channel.enabled)) return "请启用至少一个通道";
+  return "等待名称匹配的 RX 数值帧";
+}
+
+function toggleMenu(menu: Exclude<OpenMenu, undefined>, setOpenMenu: Dispatch<SetStateAction<OpenMenu>>) {
+  setOpenMenu((current) => current === menu ? undefined : menu);
+}

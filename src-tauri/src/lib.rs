@@ -29,6 +29,7 @@ async fn execute_serial(
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let core = SerialCore::new(Arc::new(MockSerialAdapter));
             let mut events = core.subscribe();

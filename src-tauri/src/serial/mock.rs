@@ -8,6 +8,21 @@ use crate::{
     serial::{AdapterConnection, SerialAdapter},
 };
 
+const MULTI_CHANNEL_SAMPLES: &[&[u8]] = &[
+    b"X1=100,X2=52,X3=24\r\n",
+    b"X1=102,X2=54,X3=24.4\r\n",
+    b"X1=106,X2=58,X3=25.1\r\n",
+    b"X1=110,X2=61,X3=26\r\n",
+    b"X1=108,X2=60,X3=25.6\r\n",
+    b"X1=104,X2=56,X3=25\r\n",
+    b"X1=98,X2=50,X3=23.8\r\n",
+    b"X1=95,X2=47,X3=23.2\r\n",
+    b"X1=97,X2=49,X3=23.5\r\n",
+    b"X1=101,X2=53,X3=24.2\r\n",
+    b"X1=105,X2=57,X3=25\r\n",
+    b"X1=109,X2=60,X3=25.8\r\n",
+];
+
 /// Development-only adapter. It has no access to a physical serial device.
 #[derive(Default)]
 pub struct MockSerialAdapter;
@@ -41,9 +56,12 @@ impl SerialAdapter for MockSerialAdapter {
             }
         });
         tokio::spawn(async move {
+            let mut sample_index = 0usize;
             loop {
                 tokio::time::sleep(Duration::from_millis(250)).await;
-                if sample_tx.send(b"100\n".to_vec()).await.is_err() {
+                let sample = MULTI_CHANNEL_SAMPLES[sample_index % MULTI_CHANNEL_SAMPLES.len()];
+                sample_index += 1;
+                if sample_tx.send(sample.to_vec()).await.is_err() {
                     break;
                 }
             }

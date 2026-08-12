@@ -29,6 +29,10 @@ pub enum CoreError {
     MustCloseToConfigure,
     #[error("adapter connection failed: {0}")]
     Adapter(String),
+    #[error("file send failed: {0}")]
+    FileSend(String),
+    #[error("file send is already active")]
+    FileSendBusy,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -109,6 +113,7 @@ pub struct SessionStatus {
     pub rx_cursor: u64,
     pub oldest_cursor: u64,
     pub buffered_bytes: usize,
+    pub buffer_limit_bytes: usize,
     pub buffered_frames: usize,
     pub dropped_frames: u64,
     pub rx_bytes: u64,
@@ -192,6 +197,17 @@ pub enum SerialCommand {
         action_id: Option<String>,
         timeout_ms: Option<u64>,
     },
+    SendFile {
+        session_id: String,
+        file_path: String,
+        chunk_size: usize,
+        interval_ms: u64,
+        timeout_ms: Option<u64>,
+        action_id: Option<String>,
+    },
+    CancelSendFile {
+        action_id: String,
+    },
     ReadSince {
         session_id: String,
         after_cursor: u64,
@@ -236,6 +252,15 @@ pub enum CommandResult {
         action_id: String,
         frame: Frame,
     },
+    FileSendStarted {
+        action_id: String,
+        file_size: u64,
+        chunk_size: usize,
+    },
+    FileSendCancelled {
+        action_id: String,
+        sent_bytes: u64,
+    },
     Read {
         read: BufferRead,
     },
@@ -261,6 +286,7 @@ pub enum EventKind {
     CommandCompleted,
     CommandFailed,
     Frame,
+    FileProgress,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -271,6 +297,17 @@ pub struct SerialEvent {
     pub action: String,
     pub action_id: Option<String>,
     pub detail: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileProgress {
+    pub action_id: String,
+    pub file_path: String,
+    pub file_size: u64,
+    pub sent_bytes: u64,
+    pub chunk_size: usize,
+    pub completed: bool,
+    pub cancelled: bool,
 }
 
 struct ActiveSession {
@@ -310,6 +347,8 @@ pub struct SerialCore {
     events: broadcast::Sender<SerialEvent>,
     audit: Arc<std::sync::Mutex<VecDeque<SerialEvent>>>,
     changed: Arc<Notify>,
+    file_send: Arc<Mutex<Option<String>>>,
+    file_cancel: Arc<Mutex<Option<String>>>,
 }
 
 impl SerialCore {
@@ -321,6 +360,8 @@ impl SerialCore {
             events,
             audit: Arc::new(std::sync::Mutex::new(VecDeque::with_capacity(512))),
             changed: Arc::new(Notify::new()),
+            file_send: Arc::new(Mutex::new(None)),
+            file_cancel: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -357,9 +398,9 @@ impl SerialCore {
     pub async fn execute(&self, command: SerialCommand) -> Result<CommandResult, CoreError> {
         let action = command_name(&command);
         let action_id = match &command {
-            SerialCommand::Send { action_id, .. } | SerialCommand::Exchange { action_id, .. } => {
-                action_id.clone()
-            }
+            SerialCommand::Send { action_id, .. }
+            | SerialCommand::Exchange { action_id, .. }
+            | SerialCommand::SendFile { action_id, .. } => action_id.clone(),
             _ => None,
         };
         self.emit(
@@ -407,6 +448,25 @@ impl SerialCore {
                 self.send(&session_id, encoding, payload, action_id, timeout_ms)
                     .await
             }
+            SerialCommand::SendFile {
+                session_id,
+                file_path,
+                chunk_size,
+                interval_ms,
+                timeout_ms,
+                action_id,
+            } => {
+                self.send_file(
+                    &session_id,
+                    file_path,
+                    chunk_size,
+                    interval_ms,
+                    timeout_ms,
+                    action_id,
+                )
+                .await
+            }
+            SerialCommand::CancelSendFile { action_id } => self.cancel_send_file(&action_id).await,
             SerialCommand::ReadSince {
                 session_id,
                 after_cursor,
@@ -542,6 +602,9 @@ impl SerialCore {
         action_id: Option<String>,
         timeout_ms: Option<u64>,
     ) -> Result<CommandResult, CoreError> {
+        if self.file_send.lock().await.is_some() {
+            return Err(CoreError::FileSendBusy);
+        }
         let bytes = decode_payload(&encoding, &payload)?;
         let outgoing = {
             let state = self.state.lock().await;
@@ -568,6 +631,109 @@ impl SerialCore {
             action_id: action_id.unwrap_or_else(|| Uuid::new_v4().to_string()),
             frame,
         })
+    }
+
+    async fn send_file(
+        &self,
+        session_id: &str,
+        file_path: String,
+        chunk_size: usize,
+        interval_ms: u64,
+        timeout_ms: Option<u64>,
+        action_id: Option<String>,
+    ) -> Result<CommandResult, CoreError> {
+        let action_id = action_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+        let chunk_size = chunk_size.clamp(1, 1024 * 1024);
+        let metadata = tokio::fs::metadata(&file_path)
+            .await
+            .map_err(|error| CoreError::FileSend(error.to_string()))?;
+        if !metadata.is_file() {
+            return Err(CoreError::FileSend("selected path is not a regular file".into()));
+        }
+        let file_size = metadata.len();
+        self.ensure_session(session_id).await?;
+        let outgoing = self.session_sender(session_id).await?;
+        {
+            let mut active = self.file_send.lock().await;
+            if active.is_some() {
+                return Err(CoreError::FileSendBusy);
+            }
+            *active = Some(action_id.clone());
+        }
+        *self.file_cancel.lock().await = None;
+        let state = self.state.clone();
+        let events = self.events.clone();
+        let audit = self.audit.clone();
+        let changed = self.changed.clone();
+        let file_send = self.file_send.clone();
+        let file_cancel = self.file_cancel.clone();
+        let file_path_for_event = file_path.clone();
+        let action_for_task = action_id.clone();
+        let timeout_ms = timeout_ms.unwrap_or(1_000);
+        tokio::spawn(async move {
+            let result = stream_file(
+                &file_path,
+                &action_for_task,
+                file_size,
+                chunk_size,
+                interval_ms,
+                timeout_ms,
+                outgoing,
+                &state,
+                &events,
+                &audit,
+                &changed,
+                &file_cancel,
+            )
+            .await;
+            let _ = file_send.lock().await.take();
+            if let Err(error) = result {
+                emit_file_progress(
+                    &events,
+                    &audit,
+                    FileProgress {
+                        action_id: action_for_task,
+                        file_path: file_path_for_event,
+                        file_size,
+                        sent_bytes: error.0,
+                        chunk_size,
+                        completed: false,
+                        cancelled: error.1,
+                    },
+                );
+            }
+        });
+        Ok(CommandResult::FileSendStarted {
+            action_id,
+            file_size,
+            chunk_size,
+        })
+    }
+
+    async fn cancel_send_file(&self, action_id: &str) -> Result<CommandResult, CoreError> {
+        let active = self.file_send.lock().await.clone();
+        if active.as_deref() != Some(action_id) {
+            return Err(CoreError::FileSend(
+                "no matching file send is active".into(),
+            ));
+        }
+        *self.file_cancel.lock().await = Some(action_id.into());
+        Ok(CommandResult::FileSendCancelled {
+            action_id: action_id.into(),
+            sent_bytes: 0,
+        })
+    }
+
+    async fn session_sender(
+        &self,
+        session_id: &str,
+    ) -> Result<tokio::sync::mpsc::Sender<Vec<u8>>, CoreError> {
+        let state = self.state.lock().await;
+        let session = state.session.as_ref().ok_or(CoreError::NotOpen)?;
+        if session.id != session_id {
+            return Err(CoreError::InvalidSession);
+        }
+        Ok(session.outgoing.clone())
     }
 
     async fn exchange(
@@ -621,6 +787,7 @@ impl SerialCore {
                 .map(|frame| frame.cursor)
                 .unwrap_or(state.next_cursor),
             buffered_bytes: state.buffered_bytes,
+            buffer_limit_bytes: MAX_BUFFER_BYTES,
             buffered_frames: state.frames.len(),
             dropped_frames: state.dropped_frames,
             rx_bytes: state.rx_bytes,
@@ -694,6 +861,100 @@ async fn append_frame(state: &Arc<Mutex<State>>, direction: Direction, bytes: Ve
         }
     }
     frame
+}
+
+async fn stream_file(
+    file_path: &str,
+    action_id: &str,
+    file_size: u64,
+    chunk_size: usize,
+    interval_ms: u64,
+    timeout_ms: u64,
+    outgoing: tokio::sync::mpsc::Sender<Vec<u8>>,
+    state: &Arc<Mutex<State>>,
+    events: &broadcast::Sender<SerialEvent>,
+    audit: &Arc<std::sync::Mutex<VecDeque<SerialEvent>>>,
+    changed: &Arc<Notify>,
+    cancel: &Arc<Mutex<Option<String>>>,
+) -> Result<u64, (u64, bool)> {
+    let mut file = match tokio::fs::File::open(file_path).await {
+        Ok(file) => file,
+        Err(_) => return Err((0, false)),
+    };
+    let mut sent_bytes = 0u64;
+    let mut buffer = vec![0u8; chunk_size];
+    loop {
+        if cancel.lock().await.as_deref() == Some(action_id) {
+            return Err((sent_bytes, true));
+        }
+        let read = match tokio::io::AsyncReadExt::read(&mut file, &mut buffer).await {
+            Ok(read) => read,
+            Err(_) => return Err((sent_bytes, false)),
+        };
+        if read == 0 {
+            break;
+        }
+        let chunk = buffer[..read].to_vec();
+        if timeout(
+            Duration::from_millis(timeout_ms),
+            outgoing.send(chunk.clone()),
+        )
+        .await
+        .is_err()
+        {
+            return Err((sent_bytes, false));
+        }
+        let frame = append_frame(state, Direction::Tx, chunk).await;
+        record_event(events, audit, frame_event(frame));
+        changed.notify_waiters();
+        sent_bytes += read as u64;
+        emit_file_progress(
+            events,
+            audit,
+            FileProgress {
+                action_id: action_id.into(),
+                file_path: file_path.into(),
+                file_size,
+                sent_bytes,
+                chunk_size,
+                completed: false,
+                cancelled: false,
+            },
+        );
+        if interval_ms > 0 {
+            tokio::time::sleep(Duration::from_millis(interval_ms)).await;
+        }
+    }
+    emit_file_progress(
+        events,
+        audit,
+        FileProgress {
+            action_id: action_id.into(),
+            file_path: file_path.into(),
+            file_size,
+            sent_bytes,
+            chunk_size,
+            completed: true,
+            cancelled: false,
+        },
+    );
+    Ok(sent_bytes)
+}
+
+fn emit_file_progress(
+    events: &broadcast::Sender<SerialEvent>,
+    audit: &Arc<std::sync::Mutex<VecDeque<SerialEvent>>>,
+    progress: FileProgress,
+) {
+    let event = SerialEvent {
+        event_id: Uuid::new_v4().to_string(),
+        timestamp_ms: now_ms(),
+        kind: EventKind::FileProgress,
+        action: "serial.send_file".into(),
+        action_id: Some(progress.action_id.clone()),
+        detail: serde_json::to_value(progress).unwrap_or_default(),
+    };
+    record_event(events, audit, event);
 }
 
 fn read_locked(
@@ -796,6 +1057,8 @@ fn command_name(command: &SerialCommand) -> &'static str {
         SerialCommand::Configure { .. } => "serial.configure",
         SerialCommand::Status => "serial.status",
         SerialCommand::Send { .. } => "serial.send",
+        SerialCommand::SendFile { .. } => "serial.send_file",
+        SerialCommand::CancelSendFile { .. } => "serial.cancel_send_file",
         SerialCommand::ReadSince { .. } => "serial.read_since",
         SerialCommand::WaitFor { .. } => "serial.wait_for",
         SerialCommand::Exchange { .. } => "serial.exchange",
@@ -810,7 +1073,7 @@ fn now_ms() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{sync::Arc, time::SystemTime};
 
     use super::*;
     use crate::{dispatch_command, serial::MockSerialAdapter};
@@ -932,7 +1195,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mock_streams_fixed_numeric_rx_samples_after_opening() {
+    async fn mock_streams_multichannel_rx_samples_after_opening() {
         let core = core();
         let (session, cursor) = open(&core).await;
         let result = core
@@ -940,7 +1203,7 @@ mod tests {
                 session_id: session,
                 after_cursor: cursor,
                 condition: WaitCondition {
-                    contains_text: Some("100".into()),
+                    contains_text: Some("X1=100,X2=52,X3=24".into()),
                     contains_hex: None,
                     frame_prefix: None,
                     regex: None,
@@ -956,7 +1219,7 @@ mod tests {
                 matched: Some(Frame { text_utf8: Some(text), .. }),
                 timed_out: false,
                 ..
-            } if text == "100\n"
+            } if text == "X1=100,X2=52,X3=24\r\n"
         ));
     }
 
@@ -992,6 +1255,49 @@ mod tests {
             }
             _ => unreachable!(),
         }
+    }
+
+    #[tokio::test]
+    async fn file_send_streams_chunks_and_reports_completion() {
+        let core = core();
+        let (session, cursor) = open(&core).await;
+        let path = std::env::temp_dir().join(format!(
+            "serialpilot-file-{}-{}.bin",
+            std::process::id(),
+            SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        tokio::fs::write(&path, [1u8, 2, 3, 4, 5]).await.unwrap();
+        let action_id = "file-test".to_string();
+        let mut events = core.subscribe();
+        let result = core.execute(SerialCommand::SendFile { session_id: session, file_path: path.to_string_lossy().into_owned(), chunk_size: 2, interval_ms: 0, timeout_ms: Some(100), action_id: Some(action_id.clone()) }).await.unwrap();
+        assert!(matches!(result, CommandResult::FileSendStarted { file_size: 5, chunk_size: 2, .. }));
+        let mut progress = None;
+        for _ in 0..20 {
+            if let Some(event) = events.try_recv().ok() {
+                if matches!(event.kind, EventKind::FileProgress) { progress = serde_json::from_value::<FileProgress>(event.detail).ok(); }
+            }
+            if progress.as_ref().is_some_and(|item| item.completed) { break; }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        let read = match core.execute(SerialCommand::ReadSince { session_id: core.status().await.session_id.unwrap(), after_cursor: cursor, max_bytes: 1024, max_frames: 16 }).await.unwrap() { CommandResult::Read { read } => read, _ => unreachable!() };
+        assert_eq!(read.frames.iter().filter(|frame| frame.direction == Direction::Tx).count(), 3);
+        assert!(progress.is_some_and(|item| item.completed && item.sent_bytes == 5));
+        tokio::fs::remove_file(path).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn file_send_can_be_cancelled() {
+        let core = core();
+        let (session, _) = open(&core).await;
+        let path = std::env::temp_dir().join(format!("serialpilot-cancel-{}.bin", std::process::id()));
+        tokio::fs::write(&path, vec![7u8; 256]).await.unwrap();
+        let action_id = "cancel-test".to_string();
+        core.execute(SerialCommand::SendFile { session_id: session, file_path: path.to_string_lossy().into_owned(), chunk_size: 1, interval_ms: 5, timeout_ms: Some(100), action_id: Some(action_id.clone()) }).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(8)).await;
+        assert!(matches!(core.execute(SerialCommand::CancelSendFile { action_id }).await.unwrap(), CommandResult::FileSendCancelled { .. }));
+        tokio::time::sleep(Duration::from_millis(15)).await;
+        assert!(core.file_send.lock().await.is_none());
+        tokio::fs::remove_file(path).await.unwrap();
     }
 
     #[tokio::test]

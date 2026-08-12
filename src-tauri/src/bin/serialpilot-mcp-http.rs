@@ -79,6 +79,8 @@ fn tool_command(name: &str, arguments: Value) -> Result<SerialCommand, String> {
             .map_err(|error| error.to_string()),
         "serial.status" => Ok(SerialCommand::Status),
         "serial.send" => decode_tagged("send", arguments),
+        "serial.send_file" => decode_tagged("send_file", arguments),
+        "serial.cancel_send_file" => decode_tagged("cancel_send_file", arguments),
         "serial.read_since" => decode_tagged("read_since", arguments),
         "serial.wait_for" => decode_tagged("wait_for", arguments),
         "serial.exchange" => decode_tagged("exchange", arguments),
@@ -97,5 +99,5 @@ fn tool_error(id: Value, message: String) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "result": { "content": [{ "type": "text", "text": message }], "isError": true } })
 }
 fn tools() -> Vec<Value> {
-    ["serial.list_ports", "serial.open", "serial.status", "serial.send", "serial.read_since", "serial.wait_for", "serial.exchange"].into_iter().map(|name| json!({ "name": name, "description": "SerialPilot structured serial command.", "inputSchema": { "type": "object", "additionalProperties": true } })).collect()
+    ["serial.list_ports", "serial.open", "serial.status", "serial.send", "serial.send_file", "serial.cancel_send_file", "serial.read_since", "serial.wait_for", "serial.exchange"].into_iter().map(|name| json!({ "name": name, "description": "SerialPilot structured serial command.", "inputSchema": { "type": "object", "additionalProperties": true } })).collect()
 }
