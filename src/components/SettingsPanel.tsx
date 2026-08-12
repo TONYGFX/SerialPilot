@@ -52,7 +52,6 @@ export function SettingsPanel({ config, ports, connected, autoReconnect, timedSe
     <h2>发送控制</h2><div className="timed-send-control"><label className="check"><input type="checkbox" checked={timedSend} onChange={(event) => onTimedSend(event.target.checked)} />定时发送</label><label className="timed-send-interval">间隔（秒）<NumberStepper value={timerSeconds} min={0.1} max={3600} step={0.1} ariaLabel="定时发送间隔秒数" onChange={onTimerSeconds} /></label></div>
     <div className="settings-divider" />
     <FileTransferSettings fileProtocol={fileProtocol} onFilePath={onFilePath} onFileProtocol={onFileProtocol} />
-    <p className="mock-note">Mock 端口每 250ms 循环输出 X1=100,X2=200 形式的变化数据，用于验证多通道波形。</p>
   </aside>;
 }
 
