@@ -3,7 +3,7 @@
  * It renders frames emitted by the serial core and delegates all commands to its caller.
  */
 
-import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type UIEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent, type UIEvent } from "react";
 import { Icon } from "./Icon";
 import { ResizableDivider } from "./ResizableDivider";
 import type { DisplayFrame, SerialStatus } from "../types/serial";
@@ -50,20 +50,28 @@ function ReceiveDisplayPicker({ value, onChange }: { value: ReceiveDisplayMode; 
 
 function FrameLog({ activity, displayMode }: { activity: DisplayFrame[]; displayMode: ReceiveDisplayMode }) {
   const logRef = useRef<HTMLDivElement>(null);
+  const followTailRef = useRef(true);
+  const adjustingScrollRef = useRef(false);
   const [followTail, setFollowTail] = useState(true);
 
-  useEffect(() => {
-    if (followTail && logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
-  }, [activity, followTail]);
+  useLayoutEffect(() => {
+    if (!followTailRef.current || !logRef.current) return;
+    const element = logRef.current;
+    adjustingScrollRef.current = true;
+    element.scrollTop = element.scrollHeight;
+    requestAnimationFrame(() => { adjustingScrollRef.current = false; });
+  }, [activity]);
 
   const handleScroll = (event: UIEvent<HTMLDivElement>) => {
+    if (adjustingScrollRef.current) return;
     const element = event.currentTarget;
-    const atTail = element.scrollHeight - element.scrollTop - element.clientHeight < 24;
-    setFollowTail(atTail);
+    const atTail = element.scrollHeight <= element.clientHeight + 1 || element.scrollHeight - element.scrollTop - element.clientHeight < 24;
+    followTailRef.current = atTail;
+    setFollowTail((current) => current === atTail ? current : atTail);
   };
 
   if (activity.length === 0) return <div className="log" aria-live="polite"><p className="empty">打开端口后，核心事件流中的 TX/RX 帧会显示在这里。</p></div>;
-  return <div className="log" aria-live="polite" ref={logRef} onScroll={handleScroll}>{activity.map((frame) => <FrameRow key={frame.cursor} frame={frame} displayMode={displayMode} />)}{!followTail && <button type="button" className="log-jump-bottom" title="滚动到最新数据" aria-label="滚动到最新数据" onClick={() => { setFollowTail(true); if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }}><Icon name="arrowDown" size={14} /></button>}</div>;
+  return <div className="log" aria-live="polite" ref={logRef} onScroll={handleScroll}>{activity.map((frame) => <FrameRow key={frame.cursor} frame={frame} displayMode={displayMode} />)}{!followTail && <button type="button" className="log-jump-bottom" title="滚动到最新数据" aria-label="滚动到最新数据" onClick={() => { followTailRef.current = true; setFollowTail(true); if (logRef.current) { adjustingScrollRef.current = true; logRef.current.scrollTop = logRef.current.scrollHeight; requestAnimationFrame(() => { adjustingScrollRef.current = false; }); } }}><Icon name="arrowDown" size={14} /></button>}</div>;
 }
 
 function FrameRow({ frame, displayMode }: { frame: DisplayFrame; displayMode: ReceiveDisplayMode }) {
