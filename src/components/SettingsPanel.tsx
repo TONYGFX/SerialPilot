@@ -66,5 +66,5 @@ function FileTransferSettings({ fileProtocol, onFilePath, onFileProtocol }: Pick
       setError(String(cause));
     }
   };
-  return <section className="file-settings"><h2>文件发送</h2><label className="file-protocol">协议<OptionPicker value={fileProtocol} options={[{ value: "null", label: "Null（裸数据）" }, { value: "xmodem", label: "Xmodem" }, { value: "xmodem-1k", label: "Xmodem-1k" }, { value: "ymodem", label: "Ymodem" }]} onChange={(value) => onFileProtocol(value as FileTransferProtocol)} /></label><button type="button" className="secondary file-picker" onClick={() => void chooseFile()}><Icon name="file" size={14} />选择文件</button>{error && <small className="file-picker-error" role="alert">{error}</small>}</section>;
+  return <section className="file-settings"><h2>文件发送</h2><label className="file-protocol">协议<OptionPicker value={fileProtocol} options={[{ value: "null", label: "Null" }, { value: "xmodem", label: "Xmodem" }, { value: "xmodem-1k", label: "Xmodem-1k" }, { value: "ymodem", label: "Ymodem" }]} onChange={(value) => onFileProtocol(value as FileTransferProtocol)} /></label><button type="button" className="secondary file-picker" onClick={() => void chooseFile()}><Icon name="file" size={14} />选择文件</button>{error && <small className="file-picker-error" role="alert">{error}</small>}</section>;
 }
