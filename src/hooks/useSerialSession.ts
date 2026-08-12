@@ -150,10 +150,6 @@ export function useSerialSession(): SerialSession {
     if (!sessionId) return;
     setError(undefined);
     if (filePath) {
-      if (fileProtocol !== "null") {
-        setError(`${protocolLabel(fileProtocol)} 需要接收端握手支持，当前版本尚未实现。`);
-        return;
-      }
       await sendFile(filePath, 256, 10);
       return;
     }
@@ -191,10 +187,6 @@ export function useSerialSession(): SerialSession {
   };
 
   return { ports, config, status, frames, waveSamples, waveChannels, fileProgress, filePath, fileProtocol, waveformPaused, payload, encoding, paused, autoReconnect, timedSend, timerSeconds, error, setConfig, setPayload, setEncoding, setFilePath, setFileProtocol, setTimedSend, setTimerSeconds, setWaveChannels, refreshPorts, open, close, send, sendFile, cancelFileSend, clearFrames, clearWaveform, saveFrames, togglePaused, toggleWaveformPaused, setAutoReconnect };
-}
-
-function protocolLabel(protocol: FileTransferProtocol): string {
-  return protocol === "xmodem-1k" ? "Xmodem-1k" : protocol[0].toUpperCase() + protocol.slice(1);
 }
 
 function useSerialEvents(handlers: SerialEventHandlers) {
