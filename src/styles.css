@@ -281,9 +281,8 @@ code { overflow: hidden; color: #d7e5e0; font: 11px ui-monospace, monospace; tex
 textarea { display: block; width: 100%; min-height: 0; height: auto; resize: none; border-radius: 0; padding: 9px 14px; font: 11px ui-monospace, monospace; }
 .file-settings { display: grid; gap: 8px; min-width: 0; }
 .file-settings h2 { margin: 0; }
-.file-settings-picker { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; min-width: 0; }
-.file-settings-picker .file-picker { width: auto; }
-.file-path-input { min-width: 0; height: 31px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-settings-picker { display: block; min-width: 0; }
+.file-settings-picker .file-picker, .file-settings > .file-picker { width: 100%; }
 .file-protocol { margin: 0; }
 .file-picker { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; white-space: nowrap; }
 .file-name { min-width: 0; overflow: hidden; color: #91a0a6; font: 10px ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
@@ -421,7 +420,6 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .app-shell[data-theme="light"] .segmented { border-color: #bdcbcf; }
 .app-shell[data-theme="light"] .segmented button { border-color: #bdcbcf; background: #f2f6f7; color: #5e737a; }
 .app-shell[data-theme="light"] .segmented .selected { background: #e4f4e9; color: #1e7044; }
-.app-shell[data-theme="light"] .file-name, .app-shell[data-theme="light"] .file-path-input { color: #61767d; }
 .app-shell[data-theme="light"] .mock-note { border-color: #d7e0e2; }
 .app-shell[data-theme="light"] .file-settings-name { border-color: #d7e0e2; }
 .app-shell[data-theme="light"] .file-progress-bar { background: #dbe5e7; }

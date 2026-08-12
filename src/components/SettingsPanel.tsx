@@ -7,7 +7,7 @@ import { useState } from "react";
 import { NumberStepper, OptionPicker, type SelectOption } from "./FormControls";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Icon } from "./Icon";
-import type { FileSendProgress, SerialConfig, SerialPort } from "../types/serial";
+import type { FileTransferProtocol, SerialConfig, SerialPort } from "../types/serial";
 
 type SettingsPanelProps = {
   config: SerialConfig;
@@ -23,12 +23,11 @@ type SettingsPanelProps = {
   onAutoReconnect: (value: boolean) => void;
   onTimedSend: (value: boolean) => void;
   onTimerSeconds: (value: number) => void;
-  fileProgress?: FileSendProgress;
-  onSendFile: (filePath: string, chunkSize: number, intervalMs: number) => Promise<void>;
-  onCancelFile: () => Promise<void>;
+  filePath: string;
+  fileProtocol: FileTransferProtocol;
+  onFilePath: (filePath: string) => void;
+  onFileProtocol: (protocol: FileTransferProtocol) => void;
 };
-
-type FileTransferProtocol = "null" | "xmodem" | "xmodem-1k" | "ymodem";
 
 const BAUD_RATES = [300, 600, 1200, 2400, 4800, 9600, 14400, 19200, 38400, 56000, 57600, 115200, 128000, 230400, 256000, 460800, 512000, 750000, 921600, 1000000, 1500000, 2000000];
 const DATA_BITS = ["5", "6", "7", "8"];
@@ -41,7 +40,7 @@ const PARITY_OPTIONS: SelectOption[] = [{ value: "none", label: "无" }, { value
  * @param props Connection state and callbacks supplied by the serial-session hook.
  * @returns The serial settings sidebar.
  */
-export function SettingsPanel({ config, ports, connected, autoReconnect, timedSend, timerSeconds, fileProgress, onChange, onOpen, onClose, onRefreshPorts, onAutoReconnect, onTimedSend, onTimerSeconds, onSendFile, onCancelFile }: SettingsPanelProps) {
+export function SettingsPanel({ config, ports, connected, autoReconnect, timedSend, timerSeconds, fileProtocol, onChange, onOpen, onClose, onRefreshPorts, onAutoReconnect, onTimedSend, onTimerSeconds, onFilePath, onFileProtocol }: SettingsPanelProps) {
   return <aside className="settings" aria-label="串口配置">
     <div className="settings-title"><h2>串口配置</h2><button type="button" className="tool-button" title="刷新串口列表" aria-label="刷新串口列表" onClick={onRefreshPorts}><Icon name="refresh" /></button></div>
     <label>端口<OptionPicker value={config.port} disabled={connected} options={ports.map((port) => ({ value: port.id, label: port.display_name }))} onChange={(port) => onChange({ ...config, port })} /></label>
@@ -52,43 +51,21 @@ export function SettingsPanel({ config, ports, connected, autoReconnect, timedSe
     <div className="settings-divider" />
     <h2>发送控制</h2><div className="timed-send-control"><label className="check"><input type="checkbox" checked={timedSend} onChange={(event) => onTimedSend(event.target.checked)} />定时发送</label><label className="timed-send-interval">间隔（秒）<NumberStepper value={timerSeconds} min={0.1} max={3600} step={0.1} ariaLabel="定时发送间隔秒数" onChange={onTimerSeconds} /></label></div>
     <div className="settings-divider" />
-    <FileTransferSettings connected={connected} fileProgress={fileProgress} onSendFile={onSendFile} onCancelFile={onCancelFile} />
+    <FileTransferSettings fileProtocol={fileProtocol} onFilePath={onFilePath} onFileProtocol={onFileProtocol} />
     <p className="mock-note">Mock 端口每 250ms 循环输出 X1=100,X2=200 形式的变化数据，用于验证多通道波形。</p>
   </aside>;
 }
 
-function FileTransferSettings({ connected, fileProgress, onSendFile, onCancelFile }: Pick<SettingsPanelProps, "connected" | "fileProgress" | "onSendFile" | "onCancelFile">) {
-  const [filePath, setFilePath] = useState("");
+function FileTransferSettings({ fileProtocol, onFilePath, onFileProtocol }: Pick<SettingsPanelProps, "fileProtocol" | "onFilePath" | "onFileProtocol">) {
   const [error, setError] = useState("");
-  const [protocol, setProtocol] = useState<FileTransferProtocol>("null");
-  const isSending = Boolean(fileProgress && !fileProgress.completed && !fileProgress.cancelled);
   const chooseFile = async () => {
     setError("");
     try {
       const selected = await open({ multiple: false, directory: false, title: "选择要发送的文件" });
-      if (typeof selected === "string") setFilePath(selected);
+      if (typeof selected === "string") onFilePath(selected);
     } catch (cause) {
       setError(String(cause));
     }
   };
-  const sendFile = async () => {
-    if (!connected || !filePath || isSending) return;
-    if (protocol !== "null") {
-      setError(`${protocolLabel(protocol)} 需要接收端握手支持，当前版本尚未实现。`);
-      return;
-    }
-    setError("");
-    await onSendFile(filePath, 256, 10);
-  };
-  return <section className="file-settings"><h2>文件发送</h2><div className="file-settings-picker"><button type="button" className="secondary file-picker" onClick={() => void chooseFile()}><Icon name="file" size={14} />选择文件</button><input className="file-path-input" readOnly value={filePath} placeholder="选择后显示文件路径" title={filePath} /></div><label className="file-protocol">协议<OptionPicker value={protocol} options={[{ value: "null", label: "Null（裸数据）" }, { value: "xmodem", label: "Xmodem（未实现）" }, { value: "xmodem-1k", label: "Xmodem-1k（未实现）" }, { value: "ymodem", label: "Ymodem（未实现）" }]} onChange={(value) => setProtocol(value as FileTransferProtocol)} /></label><button type="button" className="secondary file-send" disabled={!connected || !filePath || isSending} onClick={() => void sendFile()}>发送文件</button>{fileProgress && <FileProgressView progress={fileProgress} onCancel={onCancelFile} />}{error && <small className="file-picker-error" role="alert">{error}</small>}</section>;
-}
-
-function protocolLabel(protocol: FileTransferProtocol): string {
-  return protocol === "xmodem-1k" ? "Xmodem-1k" : protocol[0].toUpperCase() + protocol.slice(1);
-}
-
-function FileProgressView({ progress, onCancel }: { progress: FileSendProgress; onCancel: () => Promise<void> }) {
-  const percent = progress.file_size === 0 ? 100 : Math.min(100, Math.round(progress.sent_bytes / progress.file_size * 100));
-  const label = progress.cancelled ? "已取消" : progress.completed ? "已完成" : `${percent}%`;
-  return <div className="file-progress" title={`${progress.sent_bytes} / ${progress.file_size} B`}><div className="file-progress-line"><div className="file-progress-bar"><span style={{ width: `${percent}%` }} /></div><strong>{label}</strong>{!progress.completed && !progress.cancelled && <button type="button" className="file-cancel" onClick={() => void onCancel()}>取消</button>}</div></div>;
+  return <section className="file-settings"><h2>文件发送</h2><label className="file-protocol">协议<OptionPicker value={fileProtocol} options={[{ value: "null", label: "Null（裸数据）" }, { value: "xmodem", label: "Xmodem（未实现）" }, { value: "xmodem-1k", label: "Xmodem-1k（未实现）" }, { value: "ymodem", label: "Ymodem（未实现）" }]} onChange={(value) => onFileProtocol(value as FileTransferProtocol)} /></label><button type="button" className="secondary file-picker" onClick={() => void chooseFile()}><Icon name="file" size={14} />选择文件</button>{error && <small className="file-picker-error" role="alert">{error}</small>}</section>;
 }

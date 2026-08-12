@@ -17,7 +17,7 @@ import {
 } from "react";
 import { parseConfiguredFrame } from "../lib/waveform";
 import { executeSerialCommand } from "../services/serialClient";
-import type { FileSendProgress, SerialConfig, SerialEvent, SerialFrame, SerialPort, SerialStatus } from "../types/serial";
+import type { FileSendProgress, FileTransferProtocol, SerialConfig, SerialEvent, SerialFrame, SerialPort, SerialStatus } from "../types/serial";
 import type { WaveChannel, WaveSample } from "../types/waveform";
 
 const DEFAULT_CONFIG: SerialConfig = { port: "mock://loopback-01", baud_rate: 115200, data_bits: 8, parity: "none", stop_bits: 1, flow_control: "none", exclusive: true, dtr: false, rts: false };
@@ -45,6 +45,8 @@ export type SerialSession = {
   waveSamples: WaveSample[];
   waveChannels: WaveChannel[];
   fileProgress?: FileSendProgress;
+  filePath: string;
+  fileProtocol: FileTransferProtocol;
   waveformPaused: boolean;
   payload: string;
   encoding: "text" | "hex";
@@ -56,6 +58,8 @@ export type SerialSession = {
   setConfig: (config: SerialConfig) => void;
   setPayload: (payload: string) => void;
   setEncoding: (encoding: "text" | "hex") => void;
+  setFilePath: (filePath: string) => void;
+  setFileProtocol: (protocol: FileTransferProtocol) => void;
   setTimedSend: (enabled: boolean) => void;
   setTimerSeconds: (seconds: number) => void;
   setWaveChannels: (channels: WaveChannel[]) => void;
@@ -86,6 +90,8 @@ export function useSerialSession(): SerialSession {
   const [waveSamples, setWaveSamples] = useState<WaveSample[]>([]);
   const [waveChannels, setWaveChannelsState] = useState<WaveChannel[]>([]);
   const [fileProgress, setFileProgress] = useState<FileSendProgress>();
+  const [filePath, setFilePath] = useState("");
+  const [fileProtocol, setFileProtocol] = useState<FileTransferProtocol>("null");
   const [payload, setPayload] = useState("01 03 00 00 00 02");
   const [encoding, setEncoding] = useState<"text" | "hex">("hex");
   const [paused, setPaused] = useState(false);
@@ -143,6 +149,14 @@ export function useSerialSession(): SerialSession {
     event.preventDefault();
     if (!sessionId) return;
     setError(undefined);
+    if (filePath) {
+      if (fileProtocol !== "null") {
+        setError(`${protocolLabel(fileProtocol)} 需要接收端握手支持，当前版本尚未实现。`);
+        return;
+      }
+      await sendFile(filePath, 256, 10);
+      return;
+    }
     try { await executeSerialCommand({ type: "send", session_id: sessionId, encoding, payload, timeout_ms: 1000 }); } catch (cause) { setError(String(cause)); }
   };
   const clearFrames = () => { setFrames([]); setWaveSamples([]); };
@@ -176,7 +190,11 @@ export function useSerialSession(): SerialSession {
     }
   };
 
-  return { ports, config, status, frames, waveSamples, waveChannels, fileProgress, waveformPaused, payload, encoding, paused, autoReconnect, timedSend, timerSeconds, error, setConfig, setPayload, setEncoding, setTimedSend, setTimerSeconds, setWaveChannels, refreshPorts, open, close, send, sendFile, cancelFileSend, clearFrames, clearWaveform, saveFrames, togglePaused, toggleWaveformPaused, setAutoReconnect };
+  return { ports, config, status, frames, waveSamples, waveChannels, fileProgress, filePath, fileProtocol, waveformPaused, payload, encoding, paused, autoReconnect, timedSend, timerSeconds, error, setConfig, setPayload, setEncoding, setFilePath, setFileProtocol, setTimedSend, setTimerSeconds, setWaveChannels, refreshPorts, open, close, send, sendFile, cancelFileSend, clearFrames, clearWaveform, saveFrames, togglePaused, toggleWaveformPaused, setAutoReconnect };
+}
+
+function protocolLabel(protocol: FileTransferProtocol): string {
+  return protocol === "xmodem-1k" ? "Xmodem-1k" : protocol[0].toUpperCase() + protocol.slice(1);
 }
 
 function useSerialEvents(handlers: SerialEventHandlers) {

@@ -48,6 +48,8 @@ export type FileSendProgress = {
   cancelled: boolean;
 };
 
+export type FileTransferProtocol = "null" | "xmodem" | "xmodem-1k" | "ymodem";
+
 /** Connection and receive-buffer status returned by serial.status. */
 export type SerialStatus = {
   connected: boolean;
