@@ -3,7 +3,7 @@
  * It renders frames emitted by the serial core and delegates all commands to its caller.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent, type UIEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent, type UIEvent } from "react";
 import { Icon } from "./Icon";
 import { ResizableDivider } from "./ResizableDivider";
 import type { DisplayFrame, SerialStatus } from "../types/serial";
@@ -87,7 +87,47 @@ function formatHexBytes(rawHex: string): string {
 }
 
 function SendComposer({ encoding, payload, canSend, onEncoding, onPayload, onSend }: Pick<TerminalPanelProps, "encoding" | "payload" | "canSend" | "onEncoding" | "onPayload" | "onSend">) {
-  return <form className="composer" onSubmit={onSend}><div className="composer-head"><h2>发送</h2><div className="segmented"><button type="button" className={encoding === "text" ? "selected" : ""} onClick={() => onEncoding("text")}>文本</button><button type="button" className={encoding === "hex" ? "selected" : ""} onClick={() => onEncoding("hex")}>HEX</button></div></div><textarea value={payload} onChange={(event) => onPayload(event.target.value)} spellCheck={false} placeholder={encoding === "hex" ? "AA 55 01" : "输入文本"} /><button className="primary send" disabled={!canSend} type="submit">发送</button></form>;
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const changeEncoding = (next: "text" | "hex") => {
+    onEncoding(next);
+    if (next === "hex") onPayload(formatHexInput(payload));
+  };
+  const changePayload = (event: ChangeEvent<HTMLTextAreaElement>) => {
+    if (encoding !== "hex") {
+      onPayload(event.target.value);
+      return;
+    }
+    const raw = event.target.value;
+    const caret = event.target.selectionStart ?? raw.length;
+    const normalized = formatHexInput(raw);
+    const hexBeforeCaret = raw.slice(0, caret).replace(/[^0-9a-f]/gi, "").length;
+    onPayload(normalized);
+    requestAnimationFrame(() => {
+      const element = textareaRef.current;
+      if (!element) return;
+      element.selectionStart = positionAfterHexCount(normalized, hexBeforeCaret);
+      element.selectionEnd = element.selectionStart;
+    });
+  };
+
+  return <form className="composer" onSubmit={onSend}><div className="composer-head"><h2>发送</h2><div className="segmented"><button type="button" className={encoding === "text" ? "selected" : ""} onClick={() => changeEncoding("text")}>文本</button><button type="button" className={encoding === "hex" ? "selected" : ""} onClick={() => changeEncoding("hex")}>HEX</button></div></div><textarea ref={textareaRef} value={payload} onChange={changePayload} spellCheck={false} placeholder={encoding === "hex" ? "AA 55 01" : "输入文本"} /><button className="primary send" disabled={!canSend} type="submit">发送</button></form>;
+}
+
+function formatHexInput(value: string): string {
+  const normalized = value.replace(/[^0-9a-f]/gi, "").toUpperCase();
+  return normalized.match(/.{1,2}/g)?.join(" ") ?? "";
+}
+
+function positionAfterHexCount(formatted: string, hexCount: number): number {
+  if (hexCount <= 0) return 0;
+  let seen = 0;
+  for (let index = 0; index < formatted.length; index += 1) {
+    if (/[0-9A-F]/.test(formatted[index])) {
+      seen += 1;
+      if (seen === hexCount) return index + 1;
+    }
+  }
+  return formatted.length;
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
@@ -99,4 +139,4 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024).toFixed(1)} KB`;
 }
 
-export const terminalFormatters = { formatHexBytes };
+export const terminalFormatters = { formatHexBytes, formatHexInput, positionAfterHexCount };
