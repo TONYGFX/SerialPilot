@@ -23,7 +23,7 @@ type TerminalPanelProps = {
   onSend: (event: FormEvent) => void;
 };
 
-type ReceiveDisplayMode = "text" | "hex" | "both";
+type DirectionFilter = { rx: boolean; tx: boolean };
 
 /**
  * Renders received and transmitted frames plus the send composer.
@@ -33,22 +33,26 @@ type ReceiveDisplayMode = "text" | "hex" | "both";
  */
 export function TerminalPanel({ activity, status, paused, encoding, payload, canSend, onPause, onClear, onSave, onEncoding, onPayload, onSend }: TerminalPanelProps) {
   const [composerHeight, setComposerHeight] = useState(190);
-  const [receiveDisplayMode, setReceiveDisplayMode] = useState<ReceiveDisplayMode>("text");
+  const [directionFilter, setDirectionFilter] = useState<DirectionFilter>({ rx: true, tx: true });
   const consoleStyle = { "--composer-height": composerHeight + "px" } as CSSProperties;
   return <section className="console" style={consoleStyle}>
     <div className="metrics"><Metric label="会话缓冲" value={`${formatBytes(status.buffered_bytes)} / ${formatBytes(status.buffer_limit_bytes)}`} /><Metric label="丢弃帧" value={String(status.dropped_frames)} /><Metric label="总 RX" value={`${status.rx_bytes} B`} /><Metric label="总 TX" value={`${status.tx_bytes} B`} /></div>
-    <div className="log-head"><h2>实时 TX / RX</h2><div className="log-actions"><span>游标 {status.rx_cursor}</span><ReceiveDisplayPicker value={receiveDisplayMode} onChange={setReceiveDisplayMode} /><button type="button" className="icon-button" title={paused ? "继续接收显示" : "暂停接收显示"} aria-label={paused ? "继续接收显示" : "暂停接收显示"} onClick={onPause}><Icon name={paused ? "play" : "pause"} /></button><button type="button" className="icon-button" title="保存接收数据" aria-label="保存接收数据" onClick={onSave}><Icon name="download" /></button><button type="button" className="icon-button" title="清空接收数据" aria-label="清空接收数据" onClick={onClear}><Icon name="trash" /></button></div></div>
-    <FrameLog activity={activity} displayMode={receiveDisplayMode} />
+    <div className="log-head"><h2>实时 TX / RX</h2><div className="log-actions"><span>游标 {status.rx_cursor}</span><DirectionFilterPicker value={directionFilter} onChange={setDirectionFilter} /><button type="button" className="icon-button" title={paused ? "继续接收显示" : "暂停接收显示"} aria-label={paused ? "继续接收显示" : "暂停接收显示"} onClick={onPause}><Icon name={paused ? "play" : "pause"} /></button><button type="button" className="icon-button" title="保存接收数据" aria-label="保存接收数据" onClick={onSave}><Icon name="download" /></button><button type="button" className="icon-button" title="清空接收数据" aria-label="清空接收数据" onClick={onClear}><Icon name="trash" /></button></div></div>
+    <FrameLog activity={activity} directionFilter={directionFilter} />
     <ResizableDivider orientation="horizontal" value={composerHeight} min={150} max={360} onChange={setComposerHeight} label="调整发送区高度" />
     <SendComposer encoding={encoding} payload={payload} canSend={canSend} onEncoding={onEncoding} onPayload={onPayload} onSend={onSend} />
   </section>;
 }
 
-function ReceiveDisplayPicker({ value, onChange }: { value: ReceiveDisplayMode; onChange: (value: ReceiveDisplayMode) => void }) {
-  return <div className="receive-display-picker" aria-label="接收显示格式"><button type="button" className={value === "text" ? "selected" : ""} aria-pressed={value === "text"} onClick={() => onChange("text")}>文本</button><button type="button" className={value === "hex" ? "selected" : ""} aria-pressed={value === "hex"} onClick={() => onChange("hex")}>HEX</button><button type="button" className={value === "both" ? "selected" : ""} aria-pressed={value === "both"} onClick={() => onChange("both")}>混合</button></div>;
+function DirectionFilterPicker({ value, onChange }: { value: DirectionFilter; onChange: (value: DirectionFilter) => void }) {
+  const toggle = (direction: keyof DirectionFilter) => {
+    if (value[direction] && !value[direction === "rx" ? "tx" : "rx"]) return;
+    onChange({ ...value, [direction]: !value[direction] });
+  };
+  return <div className="receive-display-picker" aria-label="日志方向过滤"><button type="button" className={value.rx ? "selected" : ""} aria-pressed={value.rx} onClick={() => toggle("rx")}>RX</button><button type="button" className={value.tx ? "selected" : ""} aria-pressed={value.tx} onClick={() => toggle("tx")}>TX</button></div>;
 }
 
-function FrameLog({ activity, displayMode }: { activity: DisplayFrame[]; displayMode: ReceiveDisplayMode }) {
+function FrameLog({ activity, directionFilter }: { activity: DisplayFrame[]; directionFilter: DirectionFilter }) {
   const logRef = useRef<HTMLDivElement>(null);
   const followTailRef = useRef(true);
   const adjustingScrollRef = useRef(false);
@@ -70,15 +74,18 @@ function FrameLog({ activity, displayMode }: { activity: DisplayFrame[]; display
     setFollowTail((current) => current === atTail ? current : atTail);
   };
 
-  if (activity.length === 0) return <div className="log" aria-live="polite"><p className="empty">打开端口后，核心事件流中的 TX/RX 帧会显示在这里。</p></div>;
-  return <div className="log" aria-live="polite" ref={logRef} onScroll={handleScroll}>{activity.map((frame) => <FrameRow key={frame.cursor} frame={frame} displayMode={displayMode} />)}{!followTail && <button type="button" className="log-jump-bottom" title="滚动到最新数据" aria-label="滚动到最新数据" onClick={() => { followTailRef.current = true; setFollowTail(true); if (logRef.current) { adjustingScrollRef.current = true; logRef.current.scrollTop = logRef.current.scrollHeight; requestAnimationFrame(() => { adjustingScrollRef.current = false; }); } }}><Icon name="arrowDown" size={14} /></button>}</div>;
+  const visibleActivity = filterFramesByDirection(activity, directionFilter);
+  if (visibleActivity.length === 0) return <div className="log" aria-live="polite"><p className="empty">没有符合当前 RX / TX 筛选条件的数据。</p></div>;
+  return <div className="log" aria-live="polite" ref={logRef} onScroll={handleScroll}>{visibleActivity.map((frame) => <FrameRow key={frame.cursor} frame={frame} />)}{!followTail && <button type="button" className="log-jump-bottom" title="滚动到最新数据" aria-label="滚动到最新数据" onClick={() => { followTailRef.current = true; setFollowTail(true); if (logRef.current) { adjustingScrollRef.current = true; logRef.current.scrollTop = logRef.current.scrollHeight; requestAnimationFrame(() => { adjustingScrollRef.current = false; }); } }}><Icon name="arrowDown" size={14} /></button>}</div>;
 }
 
-function FrameRow({ frame, displayMode }: { frame: DisplayFrame; displayMode: ReceiveDisplayMode }) {
+function FrameRow({ frame }: { frame: DisplayFrame }) {
   const text = formatFrameText(frame.text_utf8, frame.raw_hex);
-  const showText = displayMode === "text" || displayMode === "both";
-  const showHex = displayMode === "hex" || displayMode === "both";
-  return <article className={`frame ${frame.direction} display-${displayMode}`}><time>{frame.local}</time><b>{frame.direction.toUpperCase()}</b>{showHex && <code>{formatHexBytes(frame.raw_hex)}</code>}{showText && <small className={displayMode === "text" ? "frame-text text-primary" : "frame-text"}>{text}</small>}</article>;
+  return <article className={`frame ${frame.direction} display-text`}><time>{frame.local}</time><b>{frame.direction.toUpperCase()}</b><small className="frame-text text-primary">{text}</small></article>;
+}
+
+function filterFramesByDirection(activity: DisplayFrame[], filter: DirectionFilter): DisplayFrame[] {
+  return activity.filter((frame) => filter[frame.direction]);
 }
 
 function formatFrameText(rawText: string | null | undefined, rawHex: string): string {
@@ -150,4 +157,4 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024).toFixed(1)} KB`;
 }
 
-export const terminalFormatters = { formatHexBytes, formatHexInput, formatFrameText, positionAfterHexCount };
+export const terminalFormatters = { formatHexBytes, formatHexInput, formatFrameText, positionAfterHexCount, filterFramesByDirection };
