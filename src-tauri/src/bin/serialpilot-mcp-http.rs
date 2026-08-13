@@ -2,7 +2,9 @@
 
 use std::sync::Arc;
 
-use serialpilot_lib::{command::SerialCore, mcp_http::McpHttpServer, serial::MockSerialAdapter};
+use serialpilot_lib::{
+    command::SerialCore, mcp_http::McpHttpServer, serial::PhysicalSerialAdapter,
+};
 
 #[tokio::main]
 async fn main() {
@@ -13,7 +15,7 @@ async fn main() {
             std::process::exit(2);
         }
     };
-    let core = Arc::new(SerialCore::new(Arc::new(MockSerialAdapter)));
+    let core = Arc::new(SerialCore::new(Arc::new(PhysicalSerialAdapter)));
     let server = match McpHttpServer::start(core, port).await {
         Ok(server) => server,
         Err(error) => {
@@ -22,7 +24,7 @@ async fn main() {
         }
     };
     let endpoint = server.status().endpoint.unwrap_or_default();
-    eprintln!("SerialPilot MCP Streamable HTTP (Mock adapter) listening on {endpoint}");
+    eprintln!("SerialPilot MCP Streamable HTTP (physical serial adapter) listening on {endpoint}");
     std::future::pending::<()>().await;
 }
 

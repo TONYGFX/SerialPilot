@@ -20,7 +20,7 @@ import { executeSerialCommand } from "../services/serialClient";
 import type { FileSendProgress, FileTransferProtocol, SerialConfig, SerialEvent, SerialFrame, SerialPort, SerialStatus } from "../types/serial";
 import type { WaveChannel, WaveSample } from "../types/waveform";
 
-const DEFAULT_CONFIG: SerialConfig = { port: "mock://loopback-01", baud_rate: 115200, data_bits: 8, parity: "none", stop_bits: 1, flow_control: "none", exclusive: true, dtr: false, rts: false };
+const DEFAULT_CONFIG: SerialConfig = { port: "", baud_rate: 115200, data_bits: 8, parity: "none", stop_bits: 1, flow_control: "none", exclusive: true, dtr: false, rts: false };
 const EMPTY_STATUS: SerialStatus = { connected: false, rx_cursor: 0, oldest_cursor: 1, buffered_bytes: 0, buffer_limit_bytes: 0, buffered_frames: 0, dropped_frames: 0, rx_bytes: 0, tx_bytes: 0 };
 
 type StateSetter<Value> = Dispatch<SetStateAction<Value>>;

@@ -6,12 +6,12 @@ use std::{
 };
 
 use serde_json::{json, Value};
-use serialpilot_lib::{command::SerialCore, mcp::handle_request, serial::MockSerialAdapter};
+use serialpilot_lib::{command::SerialCore, mcp::handle_request, serial::PhysicalSerialAdapter};
 
 #[tokio::main]
 async fn main() {
-    eprintln!("SerialPilot MCP started with Mock serial adapter");
-    let core = SerialCore::new(Arc::new(MockSerialAdapter));
+    eprintln!("SerialPilot MCP started with physical serial adapter");
+    let core = SerialCore::new(Arc::new(PhysicalSerialAdapter));
     let stdin = io::stdin();
     let mut stdout = io::stdout().lock();
 

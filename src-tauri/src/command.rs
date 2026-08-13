@@ -82,7 +82,7 @@ pub struct SerialConfig {
 impl Default for SerialConfig {
     fn default() -> Self {
         Self {
-            port: "mock://loopback-01".into(),
+            port: String::new(),
             baud_rate: 115_200,
             data_bits: 8,
             parity: "none".into(),
@@ -1645,7 +1645,7 @@ mod tests {
     use std::{sync::Arc, time::SystemTime};
 
     use super::*;
-    use crate::{dispatch_command, serial::MockSerialAdapter};
+    use crate::{dispatch_command, serial::mock::MockSerialAdapter};
 
     fn core() -> SerialCore {
         SerialCore::new(Arc::new(MockSerialAdapter))
@@ -1654,7 +1654,10 @@ mod tests {
     async fn open(core: &SerialCore) -> (String, u64) {
         match core
             .execute(SerialCommand::Open {
-                config: SerialConfig::default(),
+                config: SerialConfig {
+                    port: "mock://loopback-01".into(),
+                    ..SerialConfig::default()
+                },
             })
             .await
             .unwrap()

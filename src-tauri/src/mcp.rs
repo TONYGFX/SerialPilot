@@ -498,7 +498,7 @@ fn wait_condition_schema() -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{command::FileTransferProtocol, serial::MockSerialAdapter};
+    use crate::{command::FileTransferProtocol, serial::mock::MockSerialAdapter};
     use std::sync::Arc;
 
     #[test]
