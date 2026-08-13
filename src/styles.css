@@ -324,11 +324,7 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .settings-nav { display: grid; align-content: start; gap: 3px; padding: 14px 9px; border-right: 1px solid #2b373c; background: #11191d; }
 .settings-nav button { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 10px; border: 1px solid transparent; background: transparent; color: #8fa0a5; font-size: 11px; text-align: left; }
 .settings-nav button:hover, .settings-nav button.selected { border-color: #355744; background: #20332a; color: #c6e6cf; }
-.settings-nav button > .ui-icon, .settings-nav-dot, .settings-nav-mark { flex: 0 0 14px; width: 14px; height: 14px; }
-.settings-nav-dot { position: relative; background: transparent; }
-.settings-nav-dot::before { position: absolute; inset: 3.5px; border-radius: 50%; background: #718189; content: ""; }
-.settings-nav button.selected .settings-nav-dot::before { background: #55c778; }
-.settings-nav-mark { display: inline-grid; width: 14px; height: 14px; place-items: center; border: 1px solid currentColor; border-radius: 50%; font: 700 10px var(--serial-mono-font); line-height: 1; }
+.settings-nav button > .ui-icon { flex: 0 0 14px; width: 14px; height: 14px; }
 .settings-page { min-width: 0; min-height: 0; overflow: auto; padding: 20px 22px; }
 .settings-group { display: grid; gap: 10px; }
 .settings-theme-options { display: inline-flex; width: max-content; overflow: hidden; border: 1px solid #35434a; border-radius: 2px; }
@@ -456,8 +452,6 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .app-shell[data-theme="light"] .settings-nav { border-color: #d7e0e2; background: #f2f6f7; }
 .app-shell[data-theme="light"] .settings-nav button { color: #60757c; }
 .app-shell[data-theme="light"] .settings-nav button:hover, .app-shell[data-theme="light"] .settings-nav button.selected { border-color: #9bc5a8; background: #e7f5eb; color: #1e7044; }
-.app-shell[data-theme="light"] .settings-nav-dot::before { background: #9ba8ad; }
-.app-shell[data-theme="light"] .settings-nav button.selected .settings-nav-dot::before { background: #3fa866; }
 .app-shell[data-theme="light"] .about-details { border-color: #bdcbcf; background: #fff; }
 .app-shell[data-theme="light"] .about-details div { border-color: #d7e0e2; }
 .app-shell[data-theme="light"] .about-details dt { color: #687f86; }

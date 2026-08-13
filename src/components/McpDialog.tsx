@@ -75,8 +75,8 @@ export function McpDialog({ initialPage, theme, onThemeChange, preferences, runt
       <div className="settings-layout">
         <nav className="settings-nav" aria-label="设置分类">
           <button type="button" className={activePage === "general" ? "selected" : ""} aria-current={activePage === "general" ? "page" : undefined} onClick={() => setActivePage("general")}><Icon name="settings" size={14} />通用</button>
-          <button type="button" className={activePage === "mcp" ? "selected" : ""} aria-current={activePage === "mcp" ? "page" : undefined} onClick={() => setActivePage("mcp")}><span className="settings-nav-dot" />MCP</button>
-          <button type="button" className={activePage === "about" ? "selected" : ""} aria-current={activePage === "about" ? "page" : undefined} onClick={() => setActivePage("about")}><span className="settings-nav-mark">i</span>关于</button>
+          <button type="button" className={activePage === "mcp" ? "selected" : ""} aria-current={activePage === "mcp" ? "page" : undefined} onClick={() => setActivePage("mcp")}><Icon name="mcp" size={14} />MCP</button>
+          <button type="button" className={activePage === "about" ? "selected" : ""} aria-current={activePage === "about" ? "page" : undefined} onClick={() => setActivePage("about")}><Icon name="info" size={14} />关于</button>
         </nav>
         <div className="settings-page">
           {activePage === "general" && <section className="settings-group"><div className="settings-section-title"><h2>外观</h2><p>选择工作区的显示主题；跟随系统会在操作系统切换外观时自动更新。</p></div><div className="settings-theme-options" role="group" aria-label="界面主题"><button type="button" className={theme === "system" ? "selected" : ""} aria-pressed={theme === "system"} onClick={() => onThemeChange("system")}>跟随系统</button><button type="button" className={theme === "dark" ? "selected" : ""} aria-pressed={theme === "dark"} onClick={() => onThemeChange("dark")}>深色</button><button type="button" className={theme === "light" ? "selected" : ""} aria-pressed={theme === "light"} onClick={() => onThemeChange("light")}>浅色</button></div></section>}

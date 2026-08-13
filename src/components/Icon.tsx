@@ -16,6 +16,8 @@ export type IconName =
   | "copy"
   | "download"
   | "file"
+  | "info"
+  | "mcp"
   | "moon"
   | "pause"
   | "play"
@@ -39,6 +41,8 @@ const ICON_PATHS: Record<IconName, JSX.Element> = {
   copy: <><rect x="6" y="5" width="7" height="8" rx=".8" /><path d="M4 11V3.8c0-.45.35-.8.8-.8H11" /></>,
   download: <><path d="M9 3v8M6 8l3 3 3-3M4 14h10" /></>,
   file: <><path d="M5 2.5h5l3 3v9H5z" /><path d="M10 2.5v3h3M7 9h4M7 11.5h4" /></>,
+  info: <><circle cx="9" cy="8.5" r="6.1" /><path d="M9 7.6v4M9 5.1v.2" /></>,
+  mcp: <><path d="M5.1 5.3 12.9 11.7M12.9 5.3 5.1 11.7" /><circle cx="4.2" cy="4.6" r="1.8" /><circle cx="13.8" cy="4.6" r="1.8" /><circle cx="4.2" cy="12.4" r="1.8" /><circle cx="13.8" cy="12.4" r="1.8" /></>,
   moon: <path d="M12.7 13.5A5.8 5.8 0 0 1 5.4 6.2 5.9 5.9 0 1 0 12.7 13.5Z" />,
   pause: <><path d="M6 5v7M11 5v7" /></>,
   play: <path d="m6 4 6 4.5L6 13V4Z" fill="currentColor" stroke="none" />,
