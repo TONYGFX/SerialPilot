@@ -203,6 +203,9 @@ export function useSerialSession(): SerialSession {
     if (!fileProgress || fileProgress.completed || fileProgress.cancelled) return;
     try {
       await executeSerialCommand({ type: "cancel_send_file", action_id: fileProgress.action_id });
+      // Hide the transient progress panel immediately; the worker will emit a
+      // final cancelled event, which is handled defensively below as well.
+      setFileProgress(undefined);
     } catch (cause) {
       setError(String(cause));
     }
@@ -243,7 +246,10 @@ function handleSerialEvent(event: SerialEvent, pausedRef: MutableRefObject<boole
     appendEventFrame(frame, pausedRef.current, setFrames);
     appendWaveFrame(frame, waveformPausedRef.current, channelsRef.current, setWaveSamples);
   }
-  if (event.kind === "file_progress") setFileProgress(event.detail as FileSendProgress);
+  if (event.kind === "file_progress") {
+    const progress = event.detail as FileSendProgress;
+    setFileProgress(progress.cancelled ? undefined : progress);
+  }
   if (event.kind === "command_completed" && event.action.startsWith("waveform.")) {
     const detail = event.detail as { channels?: WaveChannel[] };
     if (detail.channels) {
