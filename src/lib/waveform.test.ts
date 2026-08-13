@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { buildWaveChart, limitSamplesPerChannel, parseConfiguredFrame } from "./waveform";
+import { buildWaveChart, formatElapsedTime, limitSamplesPerChannel, parseConfiguredFrame } from "./waveform";
 import type { WaveChannel } from "../types/waveform";
 
 const CHANNELS: WaveChannel[] = [
@@ -31,6 +31,12 @@ describe("parseConfiguredFrame", () => {
 });
 
 describe("configured waveform retention and geometry", () => {
+  it("formats elapsed time for the horizontal axis", () => {
+    expect(formatElapsedTime(0)).toBe("0 ms");
+    expect(formatElapsedTime(1250)).toBe("1.3 s");
+    expect(formatElapsedTime(65_000)).toBe("1:05");
+  });
+
   it("keeps the requested tail for every configured channel", () => {
     const samples = [
       { channelId: "x1", cursor: 1, timestampMs: 1, value: 10 },

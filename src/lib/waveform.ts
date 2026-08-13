@@ -7,7 +7,11 @@
 import type { SerialFrame } from "../types/serial";
 import type { WaveChannel, WaveSample } from "../types/waveform";
 
-export type ChartViewport = { width: number; height: number };
+export type ChartViewport = {
+  width: number;
+  height: number;
+  timeRange?: { originMs: number; startMs: number; endMs: number };
+};
 
 export type ChartPoint = { x: number; y: number; sample: WaveSample };
 
@@ -30,9 +34,10 @@ export type WaveChart = {
   labelBaseline: number;
   minLabel: string;
   maxLabel: string;
+  timeRange: { originMs: number; startMs: number; endMs: number };
   series: WaveChartSeries[];
   horizontalGrid: Array<{ y: number; label: string }>;
-  verticalGrid: number[];
+  verticalGrid: Array<{ x: number; label: string }>;
 };
 
 const NUMERIC_VALUE = /^[+-]?(?:\d+\.?\d*|\.\d+)$/;
@@ -88,19 +93,20 @@ export function limitSamplesPerChannel(samples: WaveSample[], maximumPerChannel:
 export function buildWaveChart(samples: WaveSample[], channels: WaveChannel[], viewport: ChartViewport): WaveChart {
   const geometry = createChartGeometry(viewport);
   const range = getValueRange(samples);
-  const cursorRange = getCursorRange(samples);
+  const timeRange = getTimeRange(samples, viewport.timeRange);
   const series = channels
     .filter((channel) => channel.enabled)
-    .map((channel) => createChartSeries(samples.filter((sample) => sample.channelId === channel.id), channel, range.min, range.max, cursorRange, geometry))
+    .map((channel) => createChartSeries(samples.filter((sample) => sample.channelId === channel.id), channel, range.min, range.max, timeRange, geometry))
     .filter((series) => series.path);
 
   return {
     ...geometry,
     minLabel: formatWaveValue(range.min),
     maxLabel: formatWaveValue(range.max),
+    timeRange,
     series,
     horizontalGrid: createHorizontalGrid(range.min, range.max, geometry),
-    verticalGrid: createVerticalGrid(geometry),
+    verticalGrid: createVerticalGrid(timeRange, geometry),
   };
 }
 
@@ -129,12 +135,14 @@ function getValueRange(samples: WaveSample[]): { min: number; max: number } {
   return { min: rawMin - span * 0.16, max: rawMax + span * 0.16 };
 }
 
-function getCursorRange(samples: WaveSample[]): { first: number; last: number } {
-  if (samples.length === 0) return { first: 0, last: 1 };
-  return { first: samples[0].cursor, last: samples.at(-1)?.cursor ?? samples[0].cursor };
+function getTimeRange(samples: WaveSample[], requested?: ChartViewport["timeRange"]): { originMs: number; startMs: number; endMs: number } {
+  if (requested) return requested;
+  const first = samples[0]?.timestampMs ?? 0;
+  const last = samples.at(-1)?.timestampMs ?? first + 1;
+  return { originMs: first, startMs: first, endMs: Math.max(first + 1, last) };
 }
 
-function createChartGeometry(viewport: ChartViewport): Omit<WaveChart, "minLabel" | "maxLabel" | "series" | "horizontalGrid" | "verticalGrid"> {
+function createChartGeometry(viewport: ChartViewport): Omit<WaveChart, "minLabel" | "maxLabel" | "timeRange" | "series" | "horizontalGrid" | "verticalGrid"> {
   const left = Math.max(46, Math.round(viewport.width * 0.045));
   const top = Math.max(12, Math.round(viewport.height * 0.02));
   // Keep the latest-point marker and its stroke inside the SVG viewport.
@@ -154,8 +162,8 @@ function createChartGeometry(viewport: ChartViewport): Omit<WaveChart, "minLabel
   };
 }
 
-function createChartSeries(samples: WaveSample[], channel: WaveChannel, min: number, max: number, cursorRange: { first: number; last: number }, geometry: Pick<WaveChart, "left" | "top" | "plotWidth" | "plotHeight">): WaveChartSeries {
-  const points = samples.map((sample) => sampleToPoint(sample, min, max, cursorRange, geometry));
+function createChartSeries(samples: WaveSample[], channel: WaveChannel, min: number, max: number, timeRange: { startMs: number; endMs: number }, geometry: Pick<WaveChart, "left" | "top" | "plotWidth" | "plotHeight">): WaveChartSeries {
+  const points = samples.filter((sample) => sample.timestampMs >= timeRange.startMs && sample.timestampMs <= timeRange.endMs).map((sample) => sampleToPoint(sample, min, max, timeRange, geometry));
   return {
     channel,
     points,
@@ -164,9 +172,9 @@ function createChartSeries(samples: WaveSample[], channel: WaveChannel, min: num
   };
 }
 
-function sampleToPoint(sample: WaveSample, min: number, max: number, cursorRange: { first: number; last: number }, geometry: Pick<WaveChart, "left" | "top" | "plotWidth" | "plotHeight">): ChartPoint {
-  const cursorSpan = cursorRange.last - cursorRange.first;
-  const progress = cursorSpan > 0 ? (sample.cursor - cursorRange.first) / cursorSpan : 0.5;
+function sampleToPoint(sample: WaveSample, min: number, max: number, timeRange: { startMs: number; endMs: number }, geometry: Pick<WaveChart, "left" | "top" | "plotWidth" | "plotHeight">): ChartPoint {
+  const timeSpan = timeRange.endMs - timeRange.startMs;
+  const progress = timeSpan > 0 ? (sample.timestampMs - timeRange.startMs) / timeSpan : 0;
   return {
     sample,
     x: geometry.left + progress * geometry.plotWidth,
@@ -181,6 +189,18 @@ function createHorizontalGrid(min: number, max: number, geometry: Pick<WaveChart
   });
 }
 
-function createVerticalGrid(geometry: Pick<WaveChart, "left" | "plotWidth">): number[] {
-  return Array.from({ length: 10 }, (_, index) => geometry.left + index / 9 * geometry.plotWidth);
+function createVerticalGrid(timeRange: { originMs: number; startMs: number; endMs: number }, geometry: Pick<WaveChart, "left" | "plotWidth">): Array<{ x: number; label: string }> {
+  const divisions = 8;
+  return Array.from({ length: divisions + 1 }, (_, index) => {
+    const ratio = index / divisions;
+    const timestampMs = timeRange.startMs + ratio * (timeRange.endMs - timeRange.startMs);
+    return { x: geometry.left + ratio * geometry.plotWidth, label: formatElapsedTime(timestampMs - timeRange.originMs) };
+  });
+}
+
+/** Formats elapsed monitoring time for the X axis and point inspection. */
+export function formatElapsedTime(milliseconds: number): string {
+  if (milliseconds < 1000) return `${Math.max(0, Math.round(milliseconds))} ms`;
+  if (milliseconds < 60_000) return `${(milliseconds / 1000).toFixed(milliseconds < 10_000 ? 1 : 0)} s`;
+  return `${Math.floor(milliseconds / 60_000)}:${String(Math.floor(milliseconds / 1000) % 60).padStart(2, "0")}`;
 }

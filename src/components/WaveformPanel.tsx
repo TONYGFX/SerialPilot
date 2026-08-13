@@ -17,7 +17,7 @@ import {
   type WheelEvent as ReactWheelEvent,
 } from "react";
 import { Icon } from "./Icon";
-import { buildWaveChart, formatWaveValue, limitSamplesPerChannel } from "../lib/waveform";
+import { buildWaveChart, formatElapsedTime, formatWaveValue } from "../lib/waveform";
 import type { WaveChannel, WaveSample, WaveformSettings } from "../types/waveform";
 
 type WaveformPanelProps = {
@@ -32,16 +32,13 @@ type WaveformPanelProps = {
 
 type OpenMenu = "channels" | "settings" | undefined;
 
-const DEFAULT_SETTINGS: WaveformSettings = {
-  samplesPerChannel: 240,
-  showLatestMarker: true,
-};
+const DEFAULT_SETTINGS: WaveformSettings = { showLatestMarker: true };
 
 const CHANNEL_COLORS = ["#61d792", "#5fc7dd", "#e8ba61", "#df7aa4", "#a8a6ee", "#d9935d"];
 const WAVE_AXIS_WIDTH = 58;
 const WAVE_TOOLBAR_HEIGHT = 54;
-const MIN_HORIZONTAL_ZOOM = 0.25;
-const MAX_HORIZONTAL_ZOOM = 4;
+const MIN_TIME_WINDOW_MS = 1_000;
+const MAX_TIME_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Draws configured channels using an aspect-correct SVG viewport.
@@ -55,43 +52,40 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
   const [hover, setHover] = useState<HoverPoint>();
   const [settings, setSettings] = useState<WaveformSettings>(DEFAULT_SETTINGS);
   const [openMenu, setOpenMenu] = useState<OpenMenu>();
-  const [pan, setPan] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
-  const [horizontalZoom, setHorizontalZoom] = useState(1);
+  const [timeWindowMs, setTimeWindowMs] = useState(10_000);
+  const [timeStartMs, setTimeStartMs] = useState<number>();
   const [followingLatest, setFollowingLatest] = useState(true);
   const drag = useRef<{ startX: number; startY: number; originX: number; originY: number }>();
-  const visibleSampleLimit = getVisibleSampleLimit(settings.samplesPerChannel, horizontalZoom);
-  const visibleSamples = useVisibleSamples(samples, channels, visibleSampleLimit);
-  const viewport = useMeasuredViewport(plot, settings.samplesPerChannel, horizontalZoom, channels.length);
-  const chart = useMemo(() => buildWaveChart(visibleSamples, channels, { width: viewport.contentWidth, height: viewport.contentHeight }), [visibleSamples, channels, viewport.contentWidth, viewport.contentHeight]);
-  const panBounds = useMemo(() => ({
-    x: Math.max(0, chart.viewportWidth - viewport.width),
-    y: Math.max(0, chart.viewportHeight - viewport.height),
-  }), [chart.viewportHeight, chart.viewportWidth, viewport.height, viewport.width]);
+  const firstTimestamp = samples[0]?.timestampMs;
+  const latestTimestamp = samples.at(-1)?.timestampMs ?? firstTimestamp;
+  const effectiveStart = timeStartMs ?? Math.max(firstTimestamp ?? 0, (latestTimestamp ?? 0) - timeWindowMs);
+  const viewport = useMeasuredViewport(plot);
+  const chart = useMemo(() => buildWaveChart(samples, channels, { width: viewport.width, height: viewport.height - WAVE_TOOLBAR_HEIGHT, timeRange: { originMs: firstTimestamp ?? 0, startMs: effectiveStart, endMs: effectiveStart + timeWindowMs } }), [samples, channels, viewport.width, viewport.height, firstTimestamp, effectiveStart, timeWindowMs]);
   const latestValues = useMemo(() => getLatestValues(samples), [samples]);
-  const latestCursor = visibleSamples.at(-1)?.cursor;
-
+  const latestTimestampForView = samples.at(-1)?.timestampMs;
   useEffect(() => {
-    setPan((current) => clampPan(current, panBounds));
-  }, [panBounds]);
+    if (!followingLatest || latestTimestampForView === undefined) return;
+    setTimeStartMs(Math.max(firstTimestamp ?? latestTimestampForView, latestTimestampForView - timeWindowMs));
+  }, [followingLatest, latestTimestampForView, firstTimestamp, timeWindowMs]);
 
-  useEffect(() => {
-    if (!followingLatest) return;
-    setPan({ x: -panBounds.x, y: 0 });
-  }, [followingLatest, latestCursor, panBounds]);
-
-  const updatePan = (x: number, y: number) => setPan(clampPan({ x, y }, panBounds));
+  const updateTimeStart = (next: number) => {
+    const minimumStart = firstTimestamp ?? next;
+    const maximumStart = Math.max(minimumStart, (latestTimestampForView ?? next) - timeWindowMs);
+    setTimeStartMs(Math.min(maximumStart, Math.max(minimumStart, next)));
+  };
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     setFollowingLatest(false);
     event.currentTarget.setPointerCapture(event.pointerId);
-    drag.current = { startX: event.clientX, startY: event.clientY, originX: pan.x, originY: pan.y };
+    drag.current = { startX: event.clientX, startY: event.clientY, originX: effectiveStart, originY: 0 };
     setDragging(true);
   };
   const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     const currentDrag = drag.current;
     if (!currentDrag) return;
-    updatePan(currentDrag.originX + event.clientX - currentDrag.startX, currentDrag.originY + event.clientY - currentDrag.startY);
+    const elapsedDelta = -(event.clientX - currentDrag.startX) / Math.max(1, viewport.width - WAVE_AXIS_WIDTH) * timeWindowMs;
+    updateTimeStart(currentDrag.originX + elapsedDelta);
   };
   const handlePointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
@@ -102,24 +96,27 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
     event.preventDefault();
     if (event.ctrlKey) {
       const zoomStep = event.deltaY < 0 ? 1.2 : 1 / 1.2;
-      setHorizontalZoom((current) => clampHorizontalZoom(current * zoomStep));
+      const nextWindow = clampTimeWindow(timeWindowMs / zoomStep);
+      const anchorRatio = event.nativeEvent.offsetX / Math.max(1, viewport.width - WAVE_AXIS_WIDTH);
+      const anchorTime = effectiveStart + anchorRatio * timeWindowMs;
+      setTimeWindowMs(nextWindow);
+      setTimeStartMs(anchorTime - anchorRatio * nextWindow);
       return;
     }
     setFollowingLatest(false);
-    const horizontalDelta = event.shiftKey ? event.deltaY : event.deltaX;
-    const verticalDelta = event.shiftKey ? 0 : event.deltaY;
-    updatePan(pan.x - horizontalDelta, pan.y - verticalDelta);
+    const horizontalDelta = event.shiftKey ? event.deltaY : event.deltaX || event.deltaY;
+    updateTimeStart(effectiveStart + horizontalDelta / Math.max(1, viewport.width - WAVE_AXIS_WIDTH) * timeWindowMs);
   };
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (!event.ctrlKey || event.key !== "0") return;
     event.preventDefault();
-    setHorizontalZoom(1);
-    setPan({ x: 0, y: 0 });
+    setTimeWindowMs(10_000);
+    setTimeStartMs(undefined);
     setFollowingLatest(false);
   };
   const jumpToLatest = () => {
     setFollowingLatest(true);
-    setPan({ x: -panBounds.x, y: 0 });
+    setTimeStartMs(Math.max(firstTimestamp ?? 0, (latestTimestampForView ?? 0) - timeWindowMs));
   };
 
   useDismissableMenu(toolbar, openMenu, () => setOpenMenu(undefined));
@@ -129,17 +126,17 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
       <div className="wave-surface">
         <div className="wave-axis" aria-hidden="true">
           <div className="wave-axis-content" style={{ width: WAVE_AXIS_WIDTH, height: chart.viewportHeight }}>
-            <WaveYAxis chart={chart} height={viewport.height} />
+            <WaveYAxis chart={chart} height={viewport.height - WAVE_TOOLBAR_HEIGHT} />
           </div>
         </div>
         <div className={"wave-viewport " + (dragging ? "dragging" : "")} tabIndex={0} aria-label="波形绘图区，Ctrl 加滚轮缩放横轴，拖拽平移曲线" onKeyDown={handleKeyDown} onWheel={handleWheel} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} onMouseLeave={() => setHover(undefined)}>
-          <div className="wave-pan-layer" style={{ width: chart.viewportWidth, height: chart.viewportHeight, transform: `translate(${pan.x}px, ${pan.y}px)` }}>
+          <div className="wave-pan-layer" style={{ width: chart.viewportWidth, height: chart.viewportHeight }}>
             <WaveSvg chart={chart} plot={plot} showLatestMarker={settings.showLatestMarker} onHover={setHover} onLeave={() => setHover(undefined)} />
           </div>
         </div>
       </div>
       {hover && <WaveHover point={hover} />}
-      {chart.series.length === 0 && <p className="wave-empty">{getEmptyMessage(connected, channels)}</p>}
+      {chart.series.length === 0 && <p className="wave-empty">{getEmptyMessage(connected, channels, paused)}</p>}
       <div className="wave-overlay" ref={toolbar}>
         <WaveToolbar
           channelCount={channels.length}
@@ -155,14 +152,14 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
         {openMenu === "channels" && <ChannelEditor channels={channels} latestValues={latestValues} onChange={onChannelsChange} />}
         {openMenu === "settings" && <SettingsMenu settings={settings} onChange={setSettings} />}
       </div>
-      <WaveMetadata channelCount={chart.series.length} chart={chart} sampleCount={visibleSamples.length} />
+      <WaveMetadata channelCount={chart.series.length} chart={chart} sampleCount={samples.length} />
       <WaveLegend chart={chart} />
-      <div className="wave-footer"><span>数据源：RX 名称=数值帧</span><span>X {formatHorizontalZoom(horizontalZoom)} · 每通道 {visibleSampleLimit} 样本</span></div>
+      <div className="wave-footer"><span>数据源：RX 名称=数值帧</span><span>时间窗 {formatElapsedTime(timeWindowMs)} · 起点 {formatElapsedTime(effectiveStart - (firstTimestamp ?? effectiveStart))}</span></div>
     </div>
   </section>;
 }
 
-type HoverPoint = { point: ReturnType<typeof buildWaveChart>["series"][number]["points"][number]; channel: WaveChannel; left: number; top: number };
+type HoverPoint = { point: ReturnType<typeof buildWaveChart>["series"][number]["points"][number]; channel: WaveChannel; originMs: number; left: number; top: number };
 
 function WaveYAxis({ chart, height }: { chart: ReturnType<typeof buildWaveChart>; height: number }) {
   return <svg className="wave-axis-svg" width={WAVE_AXIS_WIDTH} height={chart.viewportHeight} viewBox={`0 0 ${WAVE_AXIS_WIDTH} ${chart.viewportHeight}`} preserveAspectRatio="none">
@@ -183,15 +180,14 @@ function WaveSvg({ chart, plot, showLatestMarker, onHover, onLeave }: { chart: R
     if (!nearest) return onLeave();
     const plotBounds = plot.current?.getBoundingClientRect();
     if (!plotBounds) return onLeave();
-    onHover({ ...nearest, left: event.clientX - plotBounds.left, top: event.clientY - plotBounds.top });
+    onHover({ ...nearest, originMs: chart.timeRange.originMs, left: event.clientX - plotBounds.left, top: event.clientY - plotBounds.top });
   };
   return <svg className="wave-svg" viewBox={viewBox} preserveAspectRatio="none" role="img" aria-label="配置通道的串口接收数据波形" onMouseMove={handleMove} onMouseLeave={onLeave}>
     <rect x={chart.left} y={chart.top} width={chart.plotWidth} height={chart.plotHeight} className="wave-frame" />
     {chart.horizontalGrid.map((line, index) => <line key={"h-" + index} x1={chart.left} y1={line.y} x2={chart.right} y2={line.y} className="wave-grid" />)}
-    {chart.verticalGrid.map((x, index) => <line key={"v-" + index} x1={x} y1={chart.top} x2={x} y2={chart.bottom} className="wave-grid" />)}
+    {chart.verticalGrid.map((grid, index) => <g key={"v-" + index}><line x1={grid.x} y1={chart.top} x2={grid.x} y2={chart.bottom} className="wave-grid" /><text x={grid.x} y={chart.labelBaseline} className="wave-label" textAnchor={index === 0 ? "start" : index === chart.verticalGrid.length - 1 ? "end" : "middle"}>{grid.label}</text></g>)}
     {chart.series.map((series) => <path key={series.channel.id} d={series.path} className="wave-line" style={{ stroke: series.channel.color }} />)}
     {showLatestMarker && chart.series.map((series) => series.lastPoint && <circle key={"point-" + series.channel.id} cx={series.lastPoint.x} cy={series.lastPoint.y} r="4.5" className="wave-point" style={{ fill: series.channel.color, stroke: series.channel.color }} />)}
-    <text x={chart.left} y={chart.labelBaseline} className="wave-label">最早</text><text x={chart.right} y={chart.labelBaseline} className="wave-label" textAnchor="end">最新</text>
   </svg>;
 }
 
@@ -213,7 +209,7 @@ function WaveHover({ point }: { point: HoverPoint }) {
   return <div className="wave-hover" style={{ left, top }}>
     <strong style={{ color: point.channel.color }}>{point.channel.name}</strong>
     <span>值 {formatWaveValue(point.point.sample.value)}</span>
-    <span>时间 {new Date(point.point.sample.timestampMs).toLocaleTimeString()}</span>
+    <span>时间 {formatElapsedTime(point.point.sample.timestampMs - point.originMs)}</span>
     <span>游标 #{point.point.sample.cursor}</span>
   </div>;
 }
@@ -234,10 +230,10 @@ function WaveToolbar({ channelCount, connected, followingLatest, openMenu, pause
     <div className="wave-actions">
       <button type="button" className={"wave-action " + (openMenu === "channels" ? "active" : "")} title="配置波形通道" aria-label="配置波形通道" aria-expanded={openMenu === "channels"} onClick={() => toggleMenu("channels", onToggleMenu)}><Icon name="channels" /><b>{channelCount}</b></button>
       <button type="button" className={"wave-action " + (followingLatest ? "active" : "")} title="跳到最新数据并持续跟随" aria-label="跳到最新数据并持续跟随" aria-pressed={followingLatest} onClick={onJumpToLatest}><Icon name="arrowRight" /></button>
-      <button type="button" className={"wave-action " + (paused ? "active" : "")} title={paused ? "继续波形显示" : "暂停波形显示"} aria-label={paused ? "继续波形显示" : "暂停波形显示"} aria-pressed={paused} onClick={onPause}><Icon name={paused ? "play" : "pause"} /></button>
+      <button type="button" className={"wave-action " + (!paused ? "active" : "")} title={paused ? "开始波形监视" : "停止波形监视"} aria-label={paused ? "开始波形监视" : "停止波形监视"} aria-pressed={!paused} onClick={onPause}><Icon name={paused ? "play" : "pause"} /></button>
       <button type="button" className="wave-action" title="清空波形数据" aria-label="清空波形数据" onClick={onClear}><Icon name="trash" /></button>
       <button type="button" className={"wave-action " + (openMenu === "settings" ? "active" : "")} title="波形显示设置" aria-label="波形显示设置" aria-expanded={openMenu === "settings"} onClick={() => toggleMenu("settings", onToggleMenu)}><Icon name="settings" /></button>
-      <span className={"wave-state " + (connected ? "online" : "")}>{paused ? "已暂停" : connected ? "采集中" : "等待连接"}</span>
+      <span className={"wave-state " + (!paused && connected ? "online" : "")}>{paused ? "监视已停止" : connected ? "采集中" : "等待连接"}</span>
     </div>
   </div>;
 }
@@ -263,8 +259,6 @@ function ChannelEditorRow({ channel, channels, latestValue, onChange }: { channe
 function SettingsMenu({ settings, onChange }: { settings: WaveformSettings; onChange: Dispatch<SetStateAction<WaveformSettings>> }) {
   return <div className="wave-popover settings-menu" role="dialog" aria-label="波形显示设置">
     <strong>显示设置</strong>
-    <span className="wave-menu-label">每通道样本</span>
-    <div className="wave-option-group">{[120, 240, 500].map((count) => <button type="button" key={count} className={settings.samplesPerChannel === count ? "selected" : ""} onClick={() => onChange((current) => ({ ...current, samplesPerChannel: count }))}>{count}</button>)}</div>
     <button type="button" className={"wave-toggle-option " + (settings.showLatestMarker ? "selected" : "")} aria-pressed={settings.showLatestMarker} onClick={() => onChange((current) => ({ ...current, showLatestMarker: !current.showLatestMarker }))}>显示最新点</button>
   </div>;
 }
@@ -280,52 +274,30 @@ function WaveLegend({ chart }: { chart: ReturnType<typeof buildWaveChart> }) {
   </div>;
 }
 
-function useVisibleSamples(samples: WaveSample[], channels: WaveChannel[], samplesPerChannel: number): WaveSample[] {
-  return useMemo(() => {
-    const enabledIds = new Set(channels.filter((channel) => channel.enabled).map((channel) => channel.id));
-    return limitSamplesPerChannel(samples.filter((sample) => enabledIds.has(sample.channelId)), samplesPerChannel);
-  }, [channels, samples, samplesPerChannel]);
-}
-
-function useMeasuredViewport(plot: RefObject<HTMLDivElement>, samplesPerChannel: number, horizontalZoom: number, channelCount: number) {
-  const [viewport, setViewport] = useState({ width: 900, height: 500, contentWidth: 1000, contentHeight: 560 });
+function useMeasuredViewport(plot: RefObject<HTMLDivElement>) {
+  const [viewport, setViewport] = useState({ width: 900, height: 500 });
   useEffect(() => {
     const element = plot.current;
     if (!element) return;
-    const update = () => setViewportFromElement(element, setViewport, samplesPerChannel, horizontalZoom, channelCount);
+    const update = () => setViewportFromElement(element, setViewport);
     update();
     const observer = new ResizeObserver(update);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [plot, samplesPerChannel, horizontalZoom, channelCount]);
+  }, [plot]);
   return viewport;
 }
 
-function setViewportFromElement(element: HTMLDivElement, setViewport: Dispatch<SetStateAction<{ width: number; height: number; contentWidth: number; contentHeight: number }>>, samplesPerChannel: number, horizontalZoom: number, channelCount: number) {
+function setViewportFromElement(element: HTMLDivElement, setViewport: Dispatch<SetStateAction<{ width: number; height: number }>>) {
   const bounds = element.getBoundingClientRect();
   const width = Math.max(1, Math.round(bounds.width) - WAVE_AXIS_WIDTH);
-  const height = Math.max(1, Math.round(bounds.height) - WAVE_TOOLBAR_HEIGHT);
-  // Samples from separate channels share one arrival timeline; they must not widen it repeatedly.
-  const contentWidth = Math.max(width, 900, samplesPerChannel * 4 * Math.max(horizontalZoom, 1) + 120);
-  const contentHeight = Math.max(height, 560, channelCount * 70 + 420);
-  const next = { width, height, contentWidth, contentHeight };
-  setViewport((current) => current.width === next.width && current.height === next.height && current.contentWidth === next.contentWidth && current.contentHeight === next.contentHeight ? current : next);
+  const height = Math.max(1, Math.round(bounds.height));
+  const next = { width, height };
+  setViewport((current) => current.width === next.width && current.height === next.height ? current : next);
 }
 
-function getVisibleSampleLimit(samplesPerChannel: number, horizontalZoom: number) {
-  return Math.round(samplesPerChannel / Math.min(horizontalZoom, 1));
-}
-
-function clampHorizontalZoom(zoom: number) {
-  return Math.min(MAX_HORIZONTAL_ZOOM, Math.max(MIN_HORIZONTAL_ZOOM, zoom));
-}
-
-function formatHorizontalZoom(zoom: number) {
-  return Math.round(zoom * 100) + "%";
-}
-
-function clampPan(pan: { x: number; y: number }, bounds: { x: number; y: number }) {
-  return { x: Math.min(0, Math.max(-bounds.x, pan.x)), y: Math.min(0, Math.max(-bounds.y, pan.y)) };
+function clampTimeWindow(windowMs: number) {
+  return Math.min(MAX_TIME_WINDOW_MS, Math.max(MIN_TIME_WINDOW_MS, windowMs));
 }
 
 function useDismissableMenu(root: RefObject<HTMLDivElement>, openMenu: OpenMenu, dismiss: () => void) {
@@ -357,7 +329,8 @@ function getLatestValues(samples: WaveSample[]): Map<string, number> {
   return latest;
 }
 
-function getEmptyMessage(connected: boolean, channels: WaveChannel[]): string {
+function getEmptyMessage(connected: boolean, channels: WaveChannel[], paused: boolean): string {
+  if (paused) return "点击开始按钮启动波形监视";
   if (!connected) return "打开端口后开始采集";
   if (channels.length === 0) return "请先在通道配置中添加通道";
   if (!channels.some((channel) => channel.enabled)) return "请启用至少一个通道";

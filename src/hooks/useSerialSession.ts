@@ -96,13 +96,13 @@ export function useSerialSession(): SerialSession {
   const [payload, setPayload] = useState("01 03 00 00 00 02");
   const [encoding, setEncoding] = useState<"text" | "hex">("hex");
   const [paused, setPaused] = useState(false);
-  const [waveformPaused, setWaveformPaused] = useState(false);
+  const [waveformPaused, setWaveformPaused] = useState(true);
   const [autoReconnect, setAutoReconnectState] = useState(false);
   const [timedSend, setTimedSend] = useState(false);
   const [timerSeconds, setTimerSeconds] = useState(1);
   const [error, setError] = useState<string>();
   const pausedRef = useRef(false);
-  const waveformPausedRef = useRef(false);
+  const waveformPausedRef = useRef(true);
   const channelsRef = useRef<WaveChannel[]>([]);
   const manuallyClosedRef = useRef(false);
   const hasConnectedRef = useRef(false);
@@ -173,7 +173,13 @@ export function useSerialSession(): SerialSession {
   };
   const saveFrames = () => downloadFrameLog(frames);
   const togglePaused = () => setPaused((current) => !current);
-  const toggleWaveformPaused = () => setWaveformPaused((current) => !current);
+  const toggleWaveformPaused = () => {
+    if (waveformPausedRef.current) {
+      setWaveSamples([]);
+      void executeSerialCommand({ type: "waveform_clear_samples" }).catch((cause) => setError(String(cause)));
+    }
+    setWaveformPaused((current) => !current);
+  };
   const setWaveChannels = (channels: WaveChannel[]) => {
     setWaveChannelsState(channels);
     void executeSerialCommand({ type: "waveform_set_channels", channels }).catch((cause) => setError(String(cause)));

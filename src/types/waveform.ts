@@ -22,6 +22,5 @@ export type WaveSample = {
 
 /** Controls local to the waveform workbench rather than the serial core. */
 export type WaveformSettings = {
-  samplesPerChannel: number;
   showLatestMarker: boolean;
 };
