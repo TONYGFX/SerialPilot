@@ -5,11 +5,13 @@
  */
 
 import { useEffect, useState } from "react";
-import type { McpHttpPreferences, McpHttpStatus } from "../types/settings";
+import type { McpHttpPreferences, McpHttpStatus, Theme } from "../types/settings";
 import { NumberStepper } from "./FormControls";
 import { Icon } from "./Icon";
 
 type McpDialogProps = {
+  theme: Theme;
+  onThemeChange: (theme: Theme) => void;
   preferences: McpHttpPreferences;
   runtimeStatus: McpHttpStatus;
   onChange: (preferences: McpHttpPreferences) => void;
@@ -18,7 +20,7 @@ type McpDialogProps = {
 };
 
 /** Renders MCP transport settings and provides explicit runtime controls. */
-export function McpDialog({ preferences, runtimeStatus, onChange, onApply, onClose }: McpDialogProps) {
+export function McpDialog({ theme, onThemeChange, preferences, runtimeStatus, onChange, onApply, onClose }: McpDialogProps) {
   const [error, setError] = useState<string>();
   const [isApplying, setIsApplying] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -58,10 +60,12 @@ export function McpDialog({ preferences, runtimeStatus, onChange, onApply, onClo
   return <div className="settings-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <section className="mcp-dialog" role="dialog" aria-modal="true" aria-labelledby="mcp-dialog-title">
       <header className="app-settings-header">
-        <div><p className="eyebrow">LOCAL SERVICE</p><h2 id="mcp-dialog-title">MCP</h2></div>
-        <button type="button" className="icon-button" title="关闭 MCP 设置" aria-label="关闭 MCP 设置" onClick={onClose}><Icon name="close" /></button>
+        <div><p className="eyebrow">APPLICATION</p><h2 id="mcp-dialog-title">设置</h2></div>
+        <button type="button" className="icon-button" title="关闭设置" aria-label="关闭设置" onClick={onClose}><Icon name="close" /></button>
       </header>
       <div className="mcp-dialog-content">
+        <section className="settings-group"><div className="settings-section-title"><h2>外观</h2><p>选择工作区的显示主题。</p></div><div className="settings-theme-options" role="group" aria-label="界面主题"><button type="button" className={theme === "dark" ? "selected" : ""} aria-pressed={theme === "dark"} onClick={() => onThemeChange("dark")}>深色</button><button type="button" className={theme === "light" ? "selected" : ""} aria-pressed={theme === "light"} onClick={() => onThemeChange("light")}>浅色</button></div></section>
+        <div className="settings-divider" />
         <div className="settings-section-title"><h2>HTTP 服务</h2><p>与桌面工作区共用同一个串口核心、会话和接收缓冲区。</p></div>
         <label className="check"><input type="checkbox" checked={preferences.enabled} onChange={(event) => update({ enabled: event.target.checked })} />启用本机 HTTP MCP</label>
         <label>监听地址<input value="127.0.0.1" readOnly aria-label="HTTP MCP 监听地址" /></label>
