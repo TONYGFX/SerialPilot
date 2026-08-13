@@ -475,6 +475,7 @@ pub struct SerialCore {
     changed: Arc<Notify>,
     file_send: Arc<Mutex<Option<String>>>,
     file_cancel: Arc<Mutex<Option<String>>>,
+    file_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
 }
 
 impl SerialCore {
@@ -488,6 +489,7 @@ impl SerialCore {
             changed: Arc::new(Notify::new()),
             file_send: Arc::new(Mutex::new(None)),
             file_cancel: Arc::new(Mutex::new(None)),
+            file_task: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -1074,10 +1076,11 @@ impl SerialCore {
         let changed = self.changed.clone();
         let file_send = self.file_send.clone();
         let file_cancel = self.file_cancel.clone();
+        let file_task = self.file_task.clone();
         let file_path_for_event = file_path.clone();
         let action_for_task = action_id.clone();
         let timeout_ms = timeout_ms.unwrap_or(1_000);
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             let result = stream_file(
                 &file_path,
                 &action_for_task,
@@ -1113,6 +1116,7 @@ impl SerialCore {
                 );
             }
         });
+        *file_task.lock().await = Some(task);
         Ok(CommandResult::FileSendStarted {
             action_id,
             file_size,
@@ -1128,7 +1132,26 @@ impl SerialCore {
             ));
         }
         *self.file_cancel.lock().await = Some(action_id.into());
+        if let Some(task) = self.file_task.lock().await.take() {
+            task.abort();
+        }
+        let _ = self.file_send.lock().await.take();
         self.changed.notify_waiters();
+        self.emit(
+            EventKind::FileProgress,
+            "serial.send_file",
+            Some(action_id.to_string()),
+            serde_json::to_value(FileProgress {
+                action_id: action_id.to_string(),
+                file_path: String::new(),
+                file_size: 0,
+                sent_bytes: 0,
+                chunk_size: 0,
+                completed: false,
+                cancelled: true,
+            })
+            .unwrap_or_default(),
+        );
         Ok(CommandResult::FileSendCancelled {
             action_id: action_id.into(),
             sent_bytes: 0,
