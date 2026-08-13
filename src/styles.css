@@ -1,6 +1,7 @@
 :root {
-  font-family: Inter, "Microsoft YaHei", system-ui, sans-serif;
+  --ui-font: "Segoe UI", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
   --serial-mono-font: "Cascadia Mono", "Cascadia Code", Consolas, "DejaVu Sans Mono", monospace;
+  font-family: var(--ui-font);
   color: #d9e2e6;
   background: #101518;
   font-synthesis: none;
@@ -319,7 +320,7 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .mcp-dialog-content .check { font-size: 11px; }
 .settings-apply { width: auto; min-width: 112px; justify-self: start; padding: 0 12px; }
 .mcp-endpoint { display: grid; grid-template-columns: auto minmax(0, 1fr) 27px; align-items: center; gap: 7px; min-width: 0; min-height: 29px; padding: 0 4px 0 8px; border: 1px solid #355744; background: #17271e; color: #71c991; font: 10px var(--serial-mono-font); }
-.mcp-endpoint span { color: #a7cbb1; font: 10px system-ui, sans-serif; }
+.mcp-endpoint span { color: #a7cbb1; font: 10px var(--ui-font); }
 .mcp-endpoint code { overflow: hidden; color: inherit; font: inherit; text-overflow: ellipsis; white-space: nowrap; }
 .mcp-copy { display: grid; width: 25px; height: 25px; place-items: center; padding: 0; border: 0; border-left: 1px solid #355744; background: transparent; color: #a7cbb1; }
 .mcp-copy:hover { background: #264a32; color: #e1f5e5; }
