@@ -240,6 +240,9 @@ select, input:not([type="checkbox"]) { height: 31px; padding: 0 8px; }
 .timed-send-control { display: flex; align-items: end; justify-content: flex-start; gap: 12px; min-width: 0; }
 .timed-send-control .check { min-width: 0; margin: 0 0 7px; }
 .timed-send-interval { min-width: 0; margin: 0; }
+.unit-stepper { display: flex; align-items: stretch; min-width: 0; }
+.unit-stepper .stepper-control { flex: 1 1 auto; min-width: 0; }
+.unit-stepper > span { display: flex; align-items: center; min-width: 26px; padding: 0 7px; border: 1px solid #35434a; border-left: 0; border-radius: 0 2px 2px 0; background: #141d21; color: #91a0a6; font: 10px var(--serial-mono-font); }
 .primary, .danger { min-height: 33px; border: 0; border-radius: 2px; font-size: 11px; font-weight: 700; }
 .primary { width: 100%; background: #4dbb76; color: #07150b; }
 .danger { width: 100%; background: #b6534d; color: #fff; }
@@ -478,6 +481,7 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .app-shell[data-theme="light"] .stepper-button { background: #f2f6f7; color: #587078; }
 .app-shell[data-theme="light"] .stepper-button + .stepper-button { border-color: #bdcbcf; }
 .app-shell[data-theme="light"] .stepper-button:hover { background: #e7f5eb; color: #1e7044; }
+.app-shell[data-theme="light"] .unit-stepper > span { border-color: #bdcbcf; background: #fff; color: #60757c; }
 .app-shell[data-theme="light"] .tool-button, .app-shell[data-theme="light"] .icon-button, .app-shell[data-theme="light"] .secondary { border-color: #bdcbcf; background: #f2f6f7; color: #456068; }
 .app-shell[data-theme="light"] .tool-button:hover, .app-shell[data-theme="light"] .icon-button:hover, .app-shell[data-theme="light"] .secondary:hover { border-color: #44a66b; background: #e7f5eb; color: #1e7044; }
 .app-shell[data-theme="light"] .signal-indicator, .app-shell[data-theme="light"] .signal-toggle { border-color: #bdcbcf; background: #f2f6f7; color: #405a62; }
