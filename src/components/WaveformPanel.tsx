@@ -118,6 +118,7 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
     setFollowingLatest(true);
     setTimeStartMs(Math.max(firstTimestamp ?? 0, (latestTimestampForView ?? 0) - timeWindowMs));
   };
+  const saveWaveform = () => downloadWaveform(samples, channels);
 
   useDismissableMenu(toolbar, openMenu, () => setOpenMenu(undefined));
 
@@ -144,6 +145,7 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
           openMenu={openMenu}
           paused={paused}
           onClear={onClear}
+          onSave={saveWaveform}
           onJumpToLatest={jumpToLatest}
           onPause={onPause}
           onToggleMenu={setOpenMenu}
@@ -214,13 +216,14 @@ function WaveHover({ point }: { point: HoverPoint }) {
   </div>;
 }
 
-function WaveToolbar({ channelCount, connected, followingLatest, openMenu, paused, onClear, onJumpToLatest, onPause, onToggleMenu }: {
+function WaveToolbar({ channelCount, connected, followingLatest, openMenu, paused, onClear, onSave, onJumpToLatest, onPause, onToggleMenu }: {
   channelCount: number;
   connected: boolean;
   followingLatest: boolean;
   openMenu: OpenMenu;
   paused: boolean;
   onClear: () => void;
+  onSave: () => void;
   onJumpToLatest: () => void;
   onPause: () => void;
   onToggleMenu: Dispatch<SetStateAction<OpenMenu>>;
@@ -231,6 +234,7 @@ function WaveToolbar({ channelCount, connected, followingLatest, openMenu, pause
       <button type="button" className={"wave-action " + (openMenu === "channels" ? "active" : "")} title="配置波形通道" aria-label="配置波形通道" aria-expanded={openMenu === "channels"} onClick={() => toggleMenu("channels", onToggleMenu)}><Icon name="channels" /><b>{channelCount}</b></button>
       <button type="button" className={"wave-action " + (followingLatest ? "active" : "")} title="跳到最新数据并持续跟随" aria-label="跳到最新数据并持续跟随" aria-pressed={followingLatest} onClick={onJumpToLatest}><Icon name="arrowRight" /></button>
       <button type="button" className={"wave-action " + (!paused ? "active" : "")} title={paused ? "开始波形监视" : "停止波形监视"} aria-label={paused ? "开始波形监视" : "停止波形监视"} aria-pressed={!paused} onClick={onPause}><Icon name={paused ? "play" : "pause"} /></button>
+      <button type="button" className="wave-action" title="保存波形数据为 TXT" aria-label="保存波形数据为 TXT" onClick={onSave}><Icon name="download" /></button>
       <button type="button" className="wave-action" title="清空波形数据" aria-label="清空波形数据" onClick={onClear}><Icon name="trash" /></button>
       <button type="button" className={"wave-action " + (openMenu === "settings" ? "active" : "")} title="波形显示设置" aria-label="波形显示设置" aria-expanded={openMenu === "settings"} onClick={() => toggleMenu("settings", onToggleMenu)}><Icon name="settings" /></button>
       <span className={"wave-state " + (!paused && connected ? "online" : "")}>{paused ? "监视已停止" : connected ? "采集中" : "等待连接"}</span>
@@ -328,6 +332,26 @@ function getLatestValues(samples: WaveSample[]): Map<string, number> {
   for (const sample of samples) latest.set(sample.channelId, sample.value);
   return latest;
 }
+
+function downloadWaveform(samples: WaveSample[], channels: WaveChannel[]) {
+  const channelNames = new Map(channels.map((channel) => [channel.id, channel.name]));
+  const originMs = samples[0]?.timestampMs ?? Date.now();
+  const header = "relative_time_ms\tabsolute_time\tchannel\tvalue";
+  const rows = samples.map((sample) => [sample.timestampMs - originMs, new Date(sample.timestampMs).toISOString(), channelNames.get(sample.channelId) ?? sample.channelId, formatWaveValue(sample.value)].join("\t"));
+  const content = [header, ...rows].join("\n");
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([content], { type: "text/plain;charset=utf-8" }));
+  link.download = `SerialPilot_Waveform_${formatFileTimestamp(new Date())}.txt`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+function formatFileTimestamp(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}_${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+}
+
+export const waveformExportFormatters = { formatFileTimestamp };
 
 function getEmptyMessage(connected: boolean, channels: WaveChannel[], paused: boolean): string {
   if (paused) return "点击开始按钮启动波形监视";
