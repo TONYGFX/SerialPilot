@@ -1126,6 +1126,7 @@ impl SerialCore {
             ));
         }
         *self.file_cancel.lock().await = Some(action_id.into());
+        self.changed.notify_waiters();
         Ok(CommandResult::FileSendCancelled {
             action_id: action_id.into(),
             sent_bytes: 0,
@@ -1312,11 +1313,19 @@ async fn stream_file(
     let mut buffer = vec![0u8; chunk_size];
     let cursor = state.lock().await.next_cursor.saturating_sub(1);
     if protocol != FileTransferProtocol::Null {
-        if wait_for_control(state, changed, cursor, timeout_ms, &[0x15, 0x43])
-            .await
-            .is_none()
+        if wait_for_control(
+            state,
+            changed,
+            cancel,
+            action_id,
+            cursor,
+            timeout_ms,
+            &[0x15, 0x43],
+        )
+        .await
+        .is_none()
         {
-            return Err((0, false));
+            return Err((0, cancellation_requested(cancel, action_id).await));
         }
         if protocol == FileTransferProtocol::Ymodem {
             let mut header = vec![0u8; 128];
@@ -1336,18 +1345,34 @@ async fn stream_file(
                 timeout_ms,
             )
             .await?;
-            if wait_for_control(state, changed, before, timeout_ms, &[0x06])
-                .await
-                .is_none()
+            if wait_for_control(
+                state,
+                changed,
+                cancel,
+                action_id,
+                before,
+                timeout_ms,
+                &[0x06],
+            )
+            .await
+            .is_none()
             {
-                return Err((0, false));
+                return Err((0, cancellation_requested(cancel, action_id).await));
             }
             let after_header = state.lock().await.next_cursor.saturating_sub(1);
-            if wait_for_control(state, changed, after_header, timeout_ms, &[0x43])
-                .await
-                .is_none()
+            if wait_for_control(
+                state,
+                changed,
+                cancel,
+                action_id,
+                after_header,
+                timeout_ms,
+                &[0x43],
+            )
+            .await
+            .is_none()
             {
-                return Err((0, false));
+                return Err((0, cancellation_requested(cancel, action_id).await));
             }
         }
     }
@@ -1371,6 +1396,9 @@ async fn stream_file(
                 xmodem_frame(sequence, &chunk, true)
             }
         };
+        if cancellation_requested(cancel, action_id).await {
+            return Err((sent_bytes, true));
+        }
         let before = state.lock().await.next_cursor.saturating_sub(1);
         send_wire(
             &wire,
@@ -1383,11 +1411,19 @@ async fn stream_file(
         )
         .await?;
         if protocol != FileTransferProtocol::Null {
-            if wait_for_control(state, changed, before, timeout_ms, &[0x06])
-                .await
-                .is_none()
+            if wait_for_control(
+                state,
+                changed,
+                cancel,
+                action_id,
+                before,
+                timeout_ms,
+                &[0x06],
+            )
+            .await
+            .is_none()
             {
-                return Err((sent_bytes, false));
+                return Err((sent_bytes, cancellation_requested(cancel, action_id).await));
             }
             sequence = sequence.wrapping_add(1);
         }
@@ -1405,19 +1441,35 @@ async fn stream_file(
                 cancelled: false,
             },
         );
-        if interval_ms > 0 {
-            tokio::time::sleep(Duration::from_millis(interval_ms)).await;
+        if interval_ms > 0
+            && wait_between_chunks(
+                cancel,
+                changed,
+                action_id,
+                Duration::from_millis(interval_ms),
+            )
+            .await
+        {
+            return Err((sent_bytes, true));
         }
     }
     if protocol != FileTransferProtocol::Null {
         let eot = [0x04];
         let before = state.lock().await.next_cursor.saturating_sub(1);
         send_wire(&eot, outgoing, state, events, audit, changed, timeout_ms).await?;
-        if wait_for_control(state, changed, before, timeout_ms, &[0x06])
-            .await
-            .is_none()
+        if wait_for_control(
+            state,
+            changed,
+            cancel,
+            action_id,
+            before,
+            timeout_ms,
+            &[0x06],
+        )
+        .await
+        .is_none()
         {
-            return Err((sent_bytes, false));
+            return Err((sent_bytes, cancellation_requested(cancel, action_id).await));
         }
     }
     emit_file_progress(
@@ -1461,6 +1513,8 @@ async fn send_wire(
 async fn wait_for_control(
     state: &Arc<Mutex<State>>,
     changed: &Arc<Notify>,
+    cancel: &Arc<Mutex<Option<String>>>,
+    action_id: &str,
     after_cursor: u64,
     timeout_ms: u64,
     accepted: &[u8],
@@ -1468,6 +1522,9 @@ async fn wait_for_control(
     let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
     let mut cursor = after_cursor;
     loop {
+        if cancellation_requested(cancel, action_id).await {
+            return None;
+        }
         let snapshot = state.lock().await;
         let frames: Vec<_> = snapshot
             .frames
@@ -1491,6 +1548,22 @@ async fn wait_for_control(
         if timeout(remaining, changed.notified()).await.is_err() {
             return None;
         }
+    }
+}
+
+async fn cancellation_requested(cancel: &Arc<Mutex<Option<String>>>, action_id: &str) -> bool {
+    cancel.lock().await.as_deref() == Some(action_id)
+}
+
+async fn wait_between_chunks(
+    cancel: &Arc<Mutex<Option<String>>>,
+    changed: &Arc<Notify>,
+    action_id: &str,
+    duration: Duration,
+) -> bool {
+    tokio::select! {
+        _ = tokio::time::sleep(duration) => cancellation_requested(cancel, action_id).await,
+        _ = changed.notified() => cancellation_requested(cancel, action_id).await,
     }
 }
 

@@ -3,8 +3,8 @@ pub mod mcp;
 pub mod mcp_http;
 pub mod serial;
 
-use std::sync::Arc;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use command::{CommandResult, SerialCommand, SerialCore};
 use mcp_http::{configure_server, McpHttpConfig, McpHttpServer, McpHttpStatus};
@@ -68,7 +68,11 @@ pub fn run() {
             app.manage(McpRuntime(tokio::sync::Mutex::new(None)));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![execute_serial, configure_mcp_http, save_text_file])
+        .invoke_handler(tauri::generate_handler![
+            execute_serial,
+            configure_mcp_http,
+            save_text_file
+        ])
         .run(tauri::generate_context!())
         .expect("failed to run SerialPilot");
 }
