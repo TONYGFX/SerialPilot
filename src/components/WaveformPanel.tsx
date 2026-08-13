@@ -59,16 +59,15 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
   const drag = useRef<{ startX: number; startY: number; originX: number; originY: number }>();
   const firstTimestamp = samples[0]?.timestampMs;
   const latestTimestamp = samples.at(-1)?.timestampMs ?? firstTimestamp;
-  const effectiveStart = timeStartMs ?? Math.max(firstTimestamp ?? 0, (latestTimestamp ?? 0) - timeWindowMs);
+  // In follow mode, derive the window from the newest sample on every render;
+  // this keeps incoming RX samples visible without waiting for another effect.
+  const effectiveStart = followingLatest
+    ? Math.max(firstTimestamp ?? 0, (latestTimestamp ?? 0) - timeWindowMs)
+    : timeStartMs ?? Math.max(firstTimestamp ?? 0, (latestTimestamp ?? 0) - timeWindowMs);
   const viewport = useMeasuredViewport(plot);
   const chart = useMemo(() => buildWaveChart(samples, channels, { width: viewport.width, height: viewport.height - WAVE_TOOLBAR_HEIGHT, timeRange: { originMs: firstTimestamp ?? 0, startMs: effectiveStart, endMs: effectiveStart + timeWindowMs } }), [samples, channels, viewport.width, viewport.height, firstTimestamp, effectiveStart, timeWindowMs]);
   const latestValues = useMemo(() => getLatestValues(samples), [samples]);
   const latestTimestampForView = samples.at(-1)?.timestampMs;
-  useEffect(() => {
-    if (!followingLatest || latestTimestampForView === undefined) return;
-    setTimeStartMs(Math.max(firstTimestamp ?? latestTimestampForView, latestTimestampForView - timeWindowMs));
-  }, [followingLatest, latestTimestampForView, firstTimestamp, timeWindowMs]);
-
   const updateTimeStart = (next: number) => {
     const minimumStart = firstTimestamp ?? next;
     const maximumStart = Math.max(minimumStart, (latestTimestampForView ?? next) - timeWindowMs);
@@ -231,8 +230,8 @@ function WaveToolbar({ channelCount, connected, followingLatest, openMenu, pause
   return <div className="wave-toolbar">
     <div><h2>波形监视器</h2><p>RX 名称=数值 · 手动通道配置</p></div>
     <div className="wave-actions">
-      <button type="button" className={"wave-action " + (openMenu === "channels" ? "active" : "")} title="配置波形通道" aria-label="配置波形通道" aria-expanded={openMenu === "channels"} onClick={() => toggleMenu("channels", onToggleMenu)}><Icon name="channels" /><b>{channelCount}</b></button>
       <button type="button" className={"wave-action " + (followingLatest ? "active" : "")} title="跳到最新数据并持续跟随" aria-label="跳到最新数据并持续跟随" aria-pressed={followingLatest} onClick={onJumpToLatest}><Icon name="arrowRight" /></button>
+      <button type="button" className={"wave-action " + (openMenu === "channels" ? "active" : "")} title="配置波形通道" aria-label="配置波形通道" aria-expanded={openMenu === "channels"} onClick={() => toggleMenu("channels", onToggleMenu)}><Icon name="channels" /><b>{channelCount}</b></button>
       <button type="button" className={"wave-action " + (!paused ? "active" : "")} title={paused ? "开始波形监视" : "停止波形监视"} aria-label={paused ? "开始波形监视" : "停止波形监视"} aria-pressed={!paused} onClick={onPause}><Icon name={paused ? "play" : "pause"} /></button>
       <button type="button" className="wave-action" title="保存波形数据为 TXT" aria-label="保存波形数据为 TXT" onClick={onSave}><Icon name="download" /></button>
       <button type="button" className="wave-action" title="清空波形数据" aria-label="清空波形数据" onClick={onClear}><Icon name="trash" /></button>
