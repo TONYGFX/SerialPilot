@@ -18,6 +18,9 @@ use crate::{
     serial::{AdapterConnection, SerialAdapter},
 };
 
+const RX_IDLE_FRAME_TIMEOUT: Duration = Duration::from_millis(15);
+const MAX_RX_FRAME_BYTES: usize = 4096;
+
 #[derive(Default)]
 pub struct PhysicalSerialAdapter;
 
@@ -49,7 +52,7 @@ impl SerialAdapter for PhysicalSerialAdapter {
             .parity(parse_parity(&config.parity)?)
             .stop_bits(parse_stop_bits(config.stop_bits)?)
             .flow_control(parse_flow_control(&config.flow_control)?)
-            .timeout(Duration::from_millis(50))
+            .timeout(RX_IDLE_FRAME_TIMEOUT)
             .open()
             .map_err(|error| {
                 CoreError::Adapter(format!("unable to open {}: {error}", config.port))
@@ -115,20 +118,38 @@ fn trim_port_suffix(description: &str, port_name: &str) -> String {
 }
 
 fn run_reader(mut port: Box<dyn SerialPort>, incoming_tx: mpsc::Sender<Vec<u8>>) {
-    let mut buffer = [0_u8; 4096];
+    let mut read_buffer = [0_u8; MAX_RX_FRAME_BYTES];
+    let mut pending = Vec::with_capacity(MAX_RX_FRAME_BYTES);
     loop {
-        match port.read(&mut buffer) {
+        match port.read(&mut read_buffer) {
             Ok(size) if size > 0 => {
-                // The core owns framing and cursor assignment; the adapter only emits raw chunks.
-                if incoming_tx.blocking_send(buffer[..size].to_vec()).is_err() {
+                pending.extend_from_slice(&read_buffer[..size]);
+                if pending.len() >= MAX_RX_FRAME_BYTES && !flush_pending(&mut pending, &incoming_tx)
+                {
                     break;
                 }
             }
             Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::TimedOut => {}
-            Err(_) => break,
+            // A serial read chunk is not a message boundary. A short idle interval joins
+            // immediately adjacent chunks without waiting indefinitely for a delimiter.
+            Err(error) if error.kind() == std::io::ErrorKind::TimedOut => {
+                if !flush_pending(&mut pending, &incoming_tx) {
+                    break;
+                }
+            }
+            Err(_) => {
+                flush_pending(&mut pending, &incoming_tx);
+                break;
+            }
         }
     }
+}
+
+fn flush_pending(pending: &mut Vec<u8>, incoming_tx: &mpsc::Sender<Vec<u8>>) -> bool {
+    if pending.is_empty() {
+        return true;
+    }
+    incoming_tx.blocking_send(std::mem::take(pending)).is_ok()
 }
 
 fn parse_data_bits(value: u8) -> Result<DataBits, CoreError> {
@@ -191,5 +212,13 @@ mod tests {
             trim_port_suffix("USB-SERIAL CH340", "COM3"),
             "USB-SERIAL CH340"
         );
+    }
+
+    #[test]
+    fn batches_adjacent_read_chunks_before_the_idle_boundary() {
+        let mut pending = Vec::new();
+        pending.extend_from_slice(b"1231231");
+        pending.extend_from_slice(b"2");
+        assert_eq!(pending, b"12312312");
     }
 }
