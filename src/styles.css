@@ -266,8 +266,8 @@ select, input:not([type="checkbox"]) { height: 31px; padding: 0 8px; }
 .log-head, .composer-head { display: flex; align-items: center; justify-content: space-between; min-height: 40px; padding: 0 14px; border-bottom: 1px solid #2b373c; }
 .log-head span { color: #718189; font: 10px var(--serial-mono-font); }
 .log-actions { display: flex; align-items: center; gap: 7px; }
-.receive-display-picker { display: inline-flex; align-items: center; height: 25px; border: 1px solid #35434a; border-radius: 2px; overflow: hidden; }
-.receive-display-picker button { height: 23px; padding: 0 7px; border: 0; border-right: 1px solid #35434a; background: #1d292d; color: #839398; font-size: 9px; }
+.receive-display-picker { display: inline-flex; align-items: stretch; align-self: center; box-sizing: border-box; height: 25px; border: 1px solid #35434a; border-radius: 2px; overflow: hidden; }
+.receive-display-picker button { display: inline-flex; align-items: center; justify-content: center; height: 23px; padding: 0 7px; border: 0; border-right: 1px solid #35434a; background: #1d292d; color: #839398; font-size: 9px; line-height: 1; }
 .receive-display-picker button:last-child { border-right: 0; }
 .receive-display-picker button:hover, .receive-display-picker button.selected { background: #263f31; color: #c6e6cf; }
 .icon-button { width: 25px; height: 25px; padding: 0; font-size: 12px; }
