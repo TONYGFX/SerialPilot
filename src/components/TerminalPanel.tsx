@@ -78,7 +78,12 @@ function FrameRow({ frame, displayMode }: { frame: DisplayFrame; displayMode: Re
   const text = frame.text_utf8?.trimEnd() || "[非 UTF-8 数据]";
   const showText = displayMode === "text" || displayMode === "both";
   const showHex = displayMode === "hex" || displayMode === "both";
-  return <article className={`frame ${frame.direction} display-${displayMode}`}><time>{frame.local}</time><b>{frame.direction.toUpperCase()}</b>{showHex && <code>{frame.raw_hex}</code>}{showText && <small className={displayMode === "text" ? "frame-text text-primary" : "frame-text"}>{text}</small>}</article>;
+  return <article className={`frame ${frame.direction} display-${displayMode}`}><time>{frame.local}</time><b>{frame.direction.toUpperCase()}</b>{showHex && <code>{formatHexBytes(frame.raw_hex)}</code>}{showText && <small className={displayMode === "text" ? "frame-text text-primary" : "frame-text"}>{text}</small>}</article>;
+}
+
+function formatHexBytes(rawHex: string): string {
+  const normalized = rawHex.replace(/\s+/g, "");
+  return normalized.match(/.{1,2}/g)?.join(" ") ?? "";
 }
 
 function SendComposer({ encoding, payload, canSend, onEncoding, onPayload, onSend }: Pick<TerminalPanelProps, "encoding" | "payload" | "canSend" | "onEncoding" | "onPayload" | "onSend">) {
@@ -93,3 +98,5 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   return `${(bytes / 1024).toFixed(1)} KB`;
 }
+
+export const terminalFormatters = { formatHexBytes };
