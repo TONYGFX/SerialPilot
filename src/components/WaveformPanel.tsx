@@ -16,6 +16,8 @@ import {
   type SetStateAction,
   type WheelEvent as ReactWheelEvent,
 } from "react";
+import { save } from "@tauri-apps/plugin-dialog";
+import { writeTextFile } from "@tauri-apps/plugin-fs";
 import { Icon } from "./Icon";
 import { buildWaveChart, formatElapsedTime, formatWaveValue } from "../lib/waveform";
 import type { WaveChannel, WaveSample, WaveformSettings } from "../types/waveform";
@@ -50,6 +52,7 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
   const plot = useRef<HTMLDivElement>(null);
   const toolbar = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<HoverPoint>();
+  const [saveError, setSaveError] = useState<string>();
   const [settings, setSettings] = useState<WaveformSettings>(DEFAULT_SETTINGS);
   const [openMenu, setOpenMenu] = useState<OpenMenu>();
   const [dragging, setDragging] = useState(false);
@@ -117,7 +120,7 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
     setFollowingLatest(true);
     setTimeStartMs(Math.max(firstTimestamp ?? 0, (latestTimestampForView ?? 0) - timeWindowMs));
   };
-  const saveWaveform = () => downloadWaveform(samples, channels);
+  const saveWaveform = () => { setSaveError(undefined); void saveWaveformData(samples, channels).catch((cause) => setSaveError(String(cause))); };
 
   useDismissableMenu(toolbar, openMenu, () => setOpenMenu(undefined));
 
@@ -155,6 +158,7 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
       </div>
       <WaveMetadata channelCount={chart.series.length} chart={chart} sampleCount={samples.length} />
       <WaveLegend chart={chart} />
+      {saveError && <p className="wave-save-error" role="alert">保存失败：{saveError}</p>}
       <div className="wave-footer"><span>数据源：RX 名称=数值帧</span><span>时间窗 {formatElapsedTime(timeWindowMs)} · 起点 {formatElapsedTime(effectiveStart - (firstTimestamp ?? effectiveStart))}</span></div>
     </div>
   </section>;
@@ -332,17 +336,14 @@ function getLatestValues(samples: WaveSample[]): Map<string, number> {
   return latest;
 }
 
-function downloadWaveform(samples: WaveSample[], channels: WaveChannel[]) {
+async function saveWaveformData(samples: WaveSample[], channels: WaveChannel[]) {
   const channelNames = new Map(channels.map((channel) => [channel.id, channel.name]));
   const originMs = samples[0]?.timestampMs ?? Date.now();
   const header = "relative_time_ms\tabsolute_time\tchannel\tvalue";
   const rows = samples.map((sample) => [sample.timestampMs - originMs, new Date(sample.timestampMs).toISOString(), channelNames.get(sample.channelId) ?? sample.channelId, formatWaveValue(sample.value)].join("\t"));
   const content = [header, ...rows].join("\n");
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(new Blob([content], { type: "text/plain;charset=utf-8" }));
-  link.download = `SerialPilot_Waveform_${formatFileTimestamp(new Date())}.txt`;
-  link.click();
-  URL.revokeObjectURL(link.href);
+  const path = await save({ defaultPath: `SerialPilot_Waveform_${formatFileTimestamp(new Date())}.txt`, filters: [{ name: "文本文件", extensions: ["txt"] }] });
+  if (path) await writeTextFile(path, content);
 }
 
 function formatFileTimestamp(date: Date): string {

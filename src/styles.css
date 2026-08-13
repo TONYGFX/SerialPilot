@@ -414,6 +414,7 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .wave-line { fill: none; stroke: #61d792; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
 .wave-point { fill: #b7f3cd; stroke: #61d792; stroke-width: 2; }
 .wave-empty { position: absolute; z-index: 1; top: 50%; left: 50%; margin: 0; color: #718189; font-size: 12px; pointer-events: none; transform: translate(-50%, -50%); }
+.wave-save-error { position: absolute; z-index: 6; right: 18px; bottom: 42px; max-width: min(480px, calc(100% - 36px)); margin: 0; padding: 6px 8px; border: 1px solid #70423f; background: #291d1d; color: #d9958d; font: 10px var(--serial-mono-font); }
 .wave-footer { position: absolute; z-index: 2; right: 18px; bottom: 10px; left: 18px; display: flex; align-items: center; justify-content: space-between; min-height: 24px; padding: 0 8px; border-top: 1px solid rgb(64 80 88 / 65%); background: rgb(16 22 24 / 72%); color: #718189; font-size: 10px; pointer-events: none; }
 
 @media (max-width: 1050px) {

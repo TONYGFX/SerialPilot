@@ -5,6 +5,8 @@
  */
 
 import { listen } from "@tauri-apps/api/event";
+import { save } from "@tauri-apps/plugin-dialog";
+import { writeTextFile } from "@tauri-apps/plugin-fs";
 import {
   useCallback,
   useEffect,
@@ -171,7 +173,7 @@ export function useSerialSession(): SerialSession {
     setWaveSamples([]);
     void executeSerialCommand({ type: "waveform_clear_samples" }).catch((cause) => setError(String(cause)));
   };
-  const saveFrames = () => downloadFrameLog(frames);
+  const saveFrames = () => { void saveFrameLog(frames).catch((cause) => setError(String(cause))); };
   const togglePaused = () => setPaused((current) => !current);
   const toggleWaveformPaused = () => {
     if (waveformPausedRef.current) {
@@ -282,11 +284,12 @@ function useAutoReconnect(enabled: boolean, connected: boolean, manuallyClosedRe
   }, [enabled, connected, manuallyClosedRef, hasConnectedRef, config]);
 }
 
-function downloadFrameLog(frames: SerialFrame[]) {
+async function saveFrameLog(frames: SerialFrame[]) {
   const content = [...frames].reverse().map((frame) => `${new Date(frame.timestamp_ms).toISOString()} ${frame.direction.toUpperCase()} ${frame.raw_hex}${frame.text_utf8 ? ` ${frame.text_utf8.trim()}` : ""}`).join("\n");
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(new Blob([content], { type: "text/plain;charset=utf-8" }));
-  link.download = `serialpilot-${new Date().toISOString().replace(/[:.]/g, "-")}.log`;
-  link.click();
-  URL.revokeObjectURL(link.href);
+  const path = await save({ defaultPath: `serialpilot-${formatSaveTimestamp(new Date())}.txt`, filters: [{ name: "文本文件", extensions: ["txt"] }] });
+  if (path) await writeTextFile(path, content);
+}
+
+function formatSaveTimestamp(date: Date): string {
+  return date.toISOString().replace(/[:.]/g, "-");
 }
