@@ -4,6 +4,10 @@
 
 use std::{
     io::{Read, Write},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 
@@ -68,11 +72,18 @@ impl SerialAdapter for PhysicalSerialAdapter {
         let read_port = port.try_clone().map_err(adapter_error)?;
         let (outgoing, mut writes) = mpsc::channel::<Vec<u8>>(64);
         let (incoming_tx, incoming) = mpsc::channel::<Vec<u8>>(64);
+        let shutdown = Arc::new(AtomicBool::new(false));
         let runtime = tokio::runtime::Handle::current();
-        std::thread::spawn(move || run_reader(read_port, incoming_tx));
-        std::thread::spawn(move || {
+        let reader_shutdown = shutdown.clone();
+        let reader_worker =
+            std::thread::spawn(move || run_reader(read_port, incoming_tx, reader_shutdown));
+        let writer_shutdown = shutdown.clone();
+        let writer_worker = std::thread::spawn(move || {
             let mut write_port = port;
             while let Some(payload) = runtime.block_on(writes.recv()) {
+                if writer_shutdown.load(Ordering::Acquire) {
+                    break;
+                }
                 if write_port.write_all(&payload).is_err() {
                     break;
                 }
@@ -81,7 +92,12 @@ impl SerialAdapter for PhysicalSerialAdapter {
                 }
             }
         });
-        Ok(AdapterConnection { incoming, outgoing })
+        Ok(AdapterConnection {
+            incoming,
+            outgoing,
+            shutdown: Some(shutdown),
+            workers: vec![reader_worker, writer_worker],
+        })
     }
 }
 
@@ -117,10 +133,17 @@ fn trim_port_suffix(description: &str, port_name: &str) -> String {
     trimmed.to_string()
 }
 
-fn run_reader(mut port: Box<dyn SerialPort>, incoming_tx: mpsc::Sender<Vec<u8>>) {
+fn run_reader(
+    mut port: Box<dyn SerialPort>,
+    incoming_tx: mpsc::Sender<Vec<u8>>,
+    shutdown: Arc<AtomicBool>,
+) {
     let mut read_buffer = [0_u8; MAX_RX_FRAME_BYTES];
     let mut pending = Vec::with_capacity(MAX_RX_FRAME_BYTES);
     loop {
+        if shutdown.load(Ordering::Acquire) {
+            break;
+        }
         match port.read(&mut read_buffer) {
             Ok(size) if size > 0 => {
                 pending.extend_from_slice(&read_buffer[..size]);

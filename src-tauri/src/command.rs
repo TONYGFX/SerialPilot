@@ -435,6 +435,8 @@ struct ActiveSession {
     config: SerialConfig,
     outgoing: tokio::sync::mpsc::Sender<Vec<u8>>,
     reader: JoinHandle<()>,
+    shutdown: Option<Arc<std::sync::atomic::AtomicBool>>,
+    workers: Vec<std::thread::JoinHandle<()>>,
 }
 
 struct State {
@@ -916,6 +918,8 @@ impl SerialCore {
         let AdapterConnection {
             mut incoming,
             outgoing,
+            shutdown,
+            workers,
         } = self.adapter.open(&config).await?;
         let state = self.state.clone();
         let events = self.events.clone();
@@ -936,6 +940,8 @@ impl SerialCore {
                 config,
                 outgoing,
                 reader,
+                shutdown,
+                workers,
             });
             state.next_cursor.saturating_sub(1)
         };
@@ -955,7 +961,7 @@ impl SerialCore {
             }
             active
         };
-        session.reader.abort();
+        stop_active_session(session).await;
         Ok(CommandResult::Closed)
     }
 
@@ -973,7 +979,7 @@ impl SerialCore {
                 self.state.lock().await.session = Some(session);
                 return Err(CoreError::MustCloseToConfigure);
             }
-            session.reader.abort();
+            stop_active_session(session).await;
         }
         self.open(config).await.map(|result| match result {
             CommandResult::Opened {
@@ -1231,6 +1237,24 @@ impl SerialCore {
                 return (None, cursor, true, false);
             }
         }
+    }
+}
+
+async fn stop_active_session(session: ActiveSession) {
+    let ActiveSession {
+        outgoing,
+        reader,
+        shutdown,
+        workers,
+        ..
+    } = session;
+    if let Some(shutdown) = shutdown {
+        shutdown.store(true, std::sync::atomic::Ordering::Release);
+    }
+    drop(outgoing);
+    reader.abort();
+    for worker in workers {
+        let _ = tokio::task::spawn_blocking(move || worker.join()).await;
     }
 }
 

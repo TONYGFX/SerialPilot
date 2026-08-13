@@ -91,6 +91,11 @@ impl SerialAdapter for MockSerialAdapter {
             }
         });
 
-        Ok(AdapterConnection { incoming, outgoing })
+        Ok(AdapterConnection {
+            incoming,
+            outgoing,
+            shutdown: None,
+            workers: Vec::new(),
+        })
     }
 }

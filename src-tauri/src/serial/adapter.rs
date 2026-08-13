@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use std::sync::{atomic::AtomicBool, Arc};
 use tokio::sync::mpsc;
 
 use crate::command::{CoreError, PortInfo, SerialConfig};
@@ -7,6 +8,8 @@ use crate::command::{CoreError, PortInfo, SerialConfig};
 pub struct AdapterConnection {
     pub incoming: mpsc::Receiver<Vec<u8>>,
     pub outgoing: mpsc::Sender<Vec<u8>>,
+    pub shutdown: Option<Arc<AtomicBool>>,
+    pub workers: Vec<std::thread::JoinHandle<()>>,
 }
 
 #[async_trait]
