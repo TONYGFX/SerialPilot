@@ -332,7 +332,12 @@ pub fn tools() -> Vec<Value> {
                     ("session_id", string_schema()),
                     (
                         "items",
-                        json!({ "type": "array", "minItems": 1, "maxItems": 256 }),
+                        json!({
+                            "type": "array",
+                            "items": batch_send_item_schema(),
+                            "minItems": 1,
+                            "maxItems": 256
+                        }),
                     ),
                     ("interval_ms", integer_schema()),
                     ("action_id", string_schema()),
@@ -348,7 +353,12 @@ pub fn tools() -> Vec<Value> {
                     ("session_id", string_schema()),
                     (
                         "items",
-                        json!({ "type": "array", "minItems": 1, "maxItems": 128 }),
+                        json!({
+                            "type": "array",
+                            "items": exchange_item_schema(),
+                            "minItems": 1,
+                            "maxItems": 128
+                        }),
                     ),
                     ("action_id", string_schema()),
                 ],
@@ -362,7 +372,14 @@ pub fn tools() -> Vec<Value> {
                 vec![
                     ("session_id", string_schema()),
                     ("after_cursor", integer_schema()),
-                    ("conditions", json!({ "type": "array", "minItems": 1 })),
+                    (
+                        "conditions",
+                        json!({
+                            "type": "array",
+                            "items": wait_condition_schema(),
+                            "minItems": 1
+                        }),
+                    ),
                     ("timeout_ms", integer_schema()),
                 ],
                 vec!["session_id", "after_cursor", "conditions", "timeout_ms"],
@@ -495,6 +512,29 @@ fn wait_condition_schema() -> Value {
     )
 }
 
+fn batch_send_item_schema() -> Value {
+    object_schema(
+        vec![
+            ("encoding", string_enum(&["text", "hex", "base64"])),
+            ("payload", string_schema()),
+            ("timeout_ms", integer_schema()),
+        ],
+        vec!["encoding", "payload"],
+    )
+}
+
+fn exchange_item_schema() -> Value {
+    object_schema(
+        vec![
+            ("encoding", string_enum(&["text", "hex", "base64"])),
+            ("payload", string_schema()),
+            ("condition", wait_condition_schema()),
+            ("timeout_ms", integer_schema()),
+        ],
+        vec!["encoding", "payload", "condition", "timeout_ms"],
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -576,6 +616,29 @@ mod tests {
             ),
             Ok(SerialCommand::WaveformAddChannel { .. })
         ));
+    }
+
+    #[test]
+    fn automation_array_schemas_describe_structured_items() {
+        let catalogue = tools();
+        let schema_for = |name: &str, field: &str| {
+            catalogue
+                .iter()
+                .find(|tool| tool["name"] == name)
+                .and_then(|tool| tool["inputSchema"]["properties"][field]["items"].as_object())
+                .cloned()
+                .expect("array item schema")
+        };
+
+        assert_eq!(schema_for("serial.send_batch", "items")["type"], "object");
+        assert_eq!(
+            schema_for("serial.exchange_batch", "items")["type"],
+            "object"
+        );
+        assert_eq!(
+            schema_for("serial.wait_for_any", "conditions")["type"],
+            "object"
+        );
     }
 
     #[tokio::test]
