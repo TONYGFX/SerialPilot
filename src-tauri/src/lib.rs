@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use command::{CommandResult, SerialCommand, SerialCore};
 use mcp_http::{configure_server, McpHttpConfig, McpHttpServer, McpHttpStatus};
-use serial::PhysicalSerialAdapter;
+use serial::DesktopSerialAdapter;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 pub struct AppCore(pub Arc<SerialCore>);
@@ -44,7 +44,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            let core = Arc::new(SerialCore::new(Arc::new(PhysicalSerialAdapter)));
+            let core = Arc::new(SerialCore::new(Arc::new(DesktopSerialAdapter::default())));
             let mut events = core.subscribe();
             let handle: AppHandle = app.handle().clone();
             tauri::async_runtime::spawn(async move {

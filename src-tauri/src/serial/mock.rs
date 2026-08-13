@@ -8,6 +8,8 @@ use crate::{
     serial::{AdapterConnection, SerialAdapter},
 };
 
+pub const MOCK_LOOPBACK_PORT_ID: &str = "mock://loopback-01";
+
 const MULTI_CHANNEL_SAMPLES: &[&[u8]] = &[
     b"X1=100,X2=52,X3=24\r\n",
     b"X1=102,X2=54,X3=24.4\r\n",
@@ -31,14 +33,14 @@ pub struct MockSerialAdapter;
 impl SerialAdapter for MockSerialAdapter {
     async fn list_ports(&self) -> Result<Vec<PortInfo>, CoreError> {
         Ok(vec![PortInfo {
-            id: "mock://loopback-01".into(),
+            id: MOCK_LOOPBACK_PORT_ID.into(),
             display_name: "Mock Loopback (development only)".into(),
             is_mock: true,
         }])
     }
 
     async fn open(&self, config: &SerialConfig) -> Result<AdapterConnection, CoreError> {
-        if config.port != "mock://loopback-01" {
+        if config.port != MOCK_LOOPBACK_PORT_ID {
             return Err(CoreError::PortNotFound(config.port.clone()));
         }
 

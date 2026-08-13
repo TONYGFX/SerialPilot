@@ -17,6 +17,7 @@ import { DEFAULT_APPLICATION_PREFERENCES, type ApplicationPreferences, type McpH
 
 type WorkspaceView = "terminal" | "waveform";
 const PREFERENCES_STORAGE_KEY = "serialpilot-preferences";
+const MOCK_PORT_PREFIX = "mock://";
 
 /** Renders SerialPilot's desktop workbench. */
 export function App() {
@@ -25,7 +26,10 @@ export function App() {
   const [preferences, setPreferences] = useState<ApplicationPreferences>(readPreferences);
   const [mcpOpen, setMcpOpen] = useState(false);
   const [mcpStatus, setMcpStatus] = useState<McpHttpStatus>({ enabled: false });
+  const [debugMode, setDebugMode] = useState(false);
   const serial = useSerialSession();
+  const debugAvailable = Boolean(import.meta.env.DEV);
+  const visiblePorts = debugMode ? serial.ports : serial.ports.filter((port) => !port.id.startsWith(MOCK_PORT_PREFIX));
   const activity = useMemo(() => serial.frames.map((frame) => ({ ...frame, local: new Date(frame.timestamp_ms).toLocaleTimeString() })), [serial.frames]);
   const sessionLabel = serial.status.connected ? `已连接 · ${serial.status.session_id?.slice(0, 8)}` : "未连接";
   const canSend = Boolean(serial.status.connected && serial.status.session_id && serial.payload.trim());
@@ -48,7 +52,7 @@ export function App() {
     </header>
     {serial.error && <div className="error" role="alert">{serial.error}</div>}
     <div className="workspace" style={{ "--settings-width": `${settingsWidth}px` } as CSSProperties}>
-      <SettingsPanel config={serial.config} ports={serial.ports} connected={serial.status.connected} autoReconnect={serial.autoReconnect} timedSend={serial.timedSend} timerSeconds={serial.timerSeconds} filePath={serial.filePath} fileProtocol={serial.fileProtocol} onChange={serial.setConfig} onOpen={serial.open} onClose={serial.close} onRefreshPorts={serial.refreshPorts} onAutoReconnect={serial.setAutoReconnect} onTimedSend={serial.setTimedSend} onTimerSeconds={serial.setTimerSeconds} onFilePath={(path) => { serial.setFilePath(path); serial.setPayload(path); serial.setEncoding("text"); }} onFileProtocol={serial.setFileProtocol} />
+      <SettingsPanel config={serial.config} ports={visiblePorts} connected={serial.status.connected} debugAvailable={debugAvailable} debugEnabled={debugMode} autoReconnect={serial.autoReconnect} timedSend={serial.timedSend} timerSeconds={serial.timerSeconds} filePath={serial.filePath} fileProtocol={serial.fileProtocol} onChange={serial.setConfig} onOpen={serial.open} onClose={serial.close} onRefreshPorts={serial.refreshPorts} onDebugEnabled={(enabled) => { setDebugMode(enabled); if (!enabled && serial.config.port.startsWith(MOCK_PORT_PREFIX)) serial.setConfig({ ...serial.config, port: "" }); }} onAutoReconnect={serial.setAutoReconnect} onTimedSend={serial.setTimedSend} onTimerSeconds={serial.setTimerSeconds} onFilePath={(path) => { serial.setFilePath(path); serial.setPayload(path); serial.setEncoding("text"); }} onFileProtocol={serial.setFileProtocol} />
       <ResizableDivider orientation="vertical" value={settingsWidth} min={220} max={460} onChange={setSettingsWidth} label="调整串口配置栏宽度" />
       <div className="workspace-main">
         {view === "terminal" ? <TerminalPanel activity={activity} status={serial.status} paused={serial.paused} encoding={serial.encoding} payload={serial.payload} canSend={canSend} onPause={serial.togglePaused} onClear={serial.clearFrames} onSave={serial.saveFrames} onEncoding={serial.setEncoding} onPayload={(value) => { serial.setPayload(value); if (value !== serial.filePath) serial.setFilePath(""); }} onSend={serial.send} /> : <WaveformPanel samples={serial.waveSamples} channels={serial.waveChannels} connected={serial.status.connected} paused={serial.waveformPaused} onPause={serial.toggleWaveformPaused} onClear={serial.clearWaveform} onChannelsChange={serial.setWaveChannels} />}

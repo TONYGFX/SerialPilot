@@ -13,6 +13,8 @@ type SettingsPanelProps = {
   config: SerialConfig;
   ports: SerialPort[];
   connected: boolean;
+  debugAvailable: boolean;
+  debugEnabled: boolean;
   autoReconnect: boolean;
   timedSend: boolean;
   timerSeconds: number;
@@ -20,6 +22,7 @@ type SettingsPanelProps = {
   onOpen: () => void;
   onClose: () => void;
   onRefreshPorts: () => void;
+  onDebugEnabled: (enabled: boolean) => void;
   onAutoReconnect: (value: boolean) => void;
   onTimedSend: (value: boolean) => void;
   onTimerSeconds: (value: number) => void;
@@ -40,10 +43,11 @@ const PARITY_OPTIONS: SelectOption[] = [{ value: "none", label: "无" }, { value
  * @param props Connection state and callbacks supplied by the serial-session hook.
  * @returns The serial settings sidebar.
  */
-export function SettingsPanel({ config, ports, connected, autoReconnect, timedSend, timerSeconds, fileProtocol, onChange, onOpen, onClose, onRefreshPorts, onAutoReconnect, onTimedSend, onTimerSeconds, onFilePath, onFileProtocol }: SettingsPanelProps) {
+export function SettingsPanel({ config, ports, connected, debugAvailable, debugEnabled, autoReconnect, timedSend, timerSeconds, fileProtocol, onChange, onOpen, onClose, onRefreshPorts, onDebugEnabled, onAutoReconnect, onTimedSend, onTimerSeconds, onFilePath, onFileProtocol }: SettingsPanelProps) {
   return <aside className="settings" aria-label="串口配置">
     <div className="settings-title"><h2>串口配置</h2><button type="button" className="tool-button" title="刷新串口列表" aria-label="刷新串口列表" onClick={onRefreshPorts}><Icon name="refresh" /></button></div>
     <label>端口<OptionPicker value={config.port} disabled={connected} options={ports.map((port) => ({ value: port.id, label: port.display_name }))} onChange={(port) => onChange({ ...config, port })} /></label>
+    {debugAvailable && <label className="check debug-mode-check"><input type="checkbox" checked={debugEnabled} disabled={connected} onChange={(event) => onDebugEnabled(event.target.checked)} />Debug 模式<span>显示模拟串口</span></label>}
     <div className="field-grid"><label>波特率<OptionPicker value={String(config.baud_rate)} disabled={connected} options={BAUD_RATES.map((baudRate) => ({ value: String(baudRate), label: String(baudRate) }))} onChange={(baudRate) => onChange({ ...config, baud_rate: Number(baudRate) })} /></label><label>数据位<OptionPicker value={String(config.data_bits)} disabled={connected} options={DATA_BITS.map((value) => ({ value, label: value }))} onChange={(dataBits) => onChange({ ...config, data_bits: Number(dataBits) })} /></label><label>校验位<OptionPicker value={config.parity} disabled={connected} options={PARITY_OPTIONS} onChange={(parity) => onChange({ ...config, parity })} /></label><label>停止位<OptionPicker value={String(config.stop_bits)} disabled={connected} options={STOP_BITS.map((value) => ({ value, label: value }))} onChange={(stopBits) => onChange({ ...config, stop_bits: Number(stopBits) })} /></label></div>
     <label className="check reconnect-check"><input type="checkbox" checked={autoReconnect} onChange={(event) => onAutoReconnect(event.target.checked)} />断线后自动重连</label>
     <div className="signal-row" aria-label="串口信号线"><span className="signal-indicator unavailable" title="RI：当前适配器未提供状态读取">RI</span><span className="signal-indicator unavailable" title="DSR：当前适配器未提供状态读取">DSR</span><span className="signal-indicator unavailable" title="CTS：当前适配器未提供状态读取">CTS</span><button type="button" className={`signal-toggle ${config.dtr ? "active" : ""}`} title="DTR：打开端口前配置主机就绪线" aria-pressed={config.dtr} disabled={connected} onClick={() => onChange({ ...config, dtr: !config.dtr })}>DTR</button><button type="button" className={`signal-toggle ${config.rts ? "active" : ""}`} title="RTS：打开端口前配置请求发送线" aria-pressed={config.rts} disabled={connected} onClick={() => onChange({ ...config, rts: !config.rts })}>RTS</button></div>
