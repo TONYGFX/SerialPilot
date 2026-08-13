@@ -13,5 +13,9 @@
     "windows": [{ "title": "SerialPilot", "width": 1280, "height": 840, "minWidth": 960, "minHeight": 640, "backgroundColor": "#101518" }],
     "security": { "csp": null }
   },
-  "bundle": { "active": true, "targets": "all" }
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": ["icons/icon.ico", "icons/icon.png"]
+  }
 }
