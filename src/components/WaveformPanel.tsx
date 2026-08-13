@@ -17,8 +17,8 @@ import {
   type WheelEvent as ReactWheelEvent,
 } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
-import { writeTextFile } from "@tauri-apps/plugin-fs";
 import { Icon } from "./Icon";
+import { saveTextFile } from "../services/serialClient";
 import { buildWaveChart, formatElapsedTime, formatWaveValue } from "../lib/waveform";
 import type { WaveChannel, WaveSample, WaveformSettings } from "../types/waveform";
 
@@ -343,7 +343,7 @@ async function saveWaveformData(samples: WaveSample[], channels: WaveChannel[]) 
   const rows = samples.map((sample) => [sample.timestampMs - originMs, new Date(sample.timestampMs).toISOString(), channelNames.get(sample.channelId) ?? sample.channelId, formatWaveValue(sample.value)].join("\t"));
   const content = [header, ...rows].join("\n");
   const path = await save({ defaultPath: `SerialPilot_Waveform_${formatFileTimestamp(new Date())}.txt`, filters: [{ name: "文本文件", extensions: ["txt"] }] });
-  if (path) await writeTextFile(path, content);
+  if (path) await saveTextFile(path, content);
 }
 
 function formatFileTimestamp(date: Date): string {

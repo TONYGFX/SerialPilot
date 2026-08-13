@@ -6,7 +6,6 @@
 
 import { listen } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
-import { writeTextFile } from "@tauri-apps/plugin-fs";
 import {
   useCallback,
   useEffect,
@@ -18,7 +17,7 @@ import {
   type SetStateAction,
 } from "react";
 import { parseConfiguredFrame } from "../lib/waveform";
-import { executeSerialCommand } from "../services/serialClient";
+import { executeSerialCommand, saveTextFile } from "../services/serialClient";
 import type { FileSendProgress, FileTransferProtocol, SerialConfig, SerialEvent, SerialFrame, SerialPort, SerialStatus } from "../types/serial";
 import type { WaveChannel, WaveSample } from "../types/waveform";
 
@@ -287,7 +286,7 @@ function useAutoReconnect(enabled: boolean, connected: boolean, manuallyClosedRe
 async function saveFrameLog(frames: SerialFrame[]) {
   const content = [...frames].reverse().map((frame) => `${new Date(frame.timestamp_ms).toISOString()} ${frame.direction.toUpperCase()} ${frame.raw_hex}${frame.text_utf8 ? ` ${frame.text_utf8.trim()}` : ""}`).join("\n");
   const path = await save({ defaultPath: `serialpilot-${formatSaveTimestamp(new Date())}.txt`, filters: [{ name: "文本文件", extensions: ["txt"] }] });
-  if (path) await writeTextFile(path, content);
+  if (path) await saveTextFile(path, content);
 }
 
 function formatSaveTimestamp(date: Date): string {

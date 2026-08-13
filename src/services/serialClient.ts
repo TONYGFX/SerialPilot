@@ -27,3 +27,8 @@ export async function executeSerialCommand<Result>(command: unknown): Promise<Re
 export async function configureMcpHttp(config: McpHttpPreferences): Promise<McpHttpStatus> {
   return invoke<McpHttpStatus>("configure_mcp_http", { config });
 }
+
+/** Writes content to a path selected by the user through the native save dialog. */
+export async function saveTextFile(path: string, content: string): Promise<void> {
+  await invoke("save_text_file", { path, content });
+}

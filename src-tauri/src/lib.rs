@@ -4,6 +4,7 @@ pub mod mcp_http;
 pub mod serial;
 
 use std::sync::Arc;
+use std::path::PathBuf;
 
 use command::{CommandResult, SerialCommand, SerialCore};
 use mcp_http::{configure_server, McpHttpConfig, McpHttpServer, McpHttpStatus};
@@ -40,10 +41,19 @@ async fn configure_mcp_http(
     configure_server(&runtime.0, core.0.clone(), config).await
 }
 
+#[tauri::command]
+fn save_text_file(path: String, content: String) -> Result<(), String> {
+    let file_path = PathBuf::from(path.trim());
+    if file_path.as_os_str().is_empty() {
+        return Err("保存路径为空".to_string());
+    }
+    std::fs::write(&file_path, content.as_bytes())
+        .map_err(|error| format!("写入文件失败：{}", error))
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let core = Arc::new(SerialCore::new(Arc::new(DesktopSerialAdapter::default())));
@@ -58,7 +68,7 @@ pub fn run() {
             app.manage(McpRuntime(tokio::sync::Mutex::new(None)));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![execute_serial, configure_mcp_http])
+        .invoke_handler(tauri::generate_handler![execute_serial, configure_mcp_http, save_text_file])
         .run(tauri::generate_context!())
         .expect("failed to run SerialPilot");
 }
