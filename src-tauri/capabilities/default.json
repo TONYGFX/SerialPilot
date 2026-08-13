@@ -3,5 +3,5 @@
   "identifier": "main-capability",
   "description": "Permissions for the SerialPilot desktop window.",
   "windows": ["main"],
-  "permissions": ["core:default", "core:event:allow-listen", "dialog:default"]
+  "permissions": ["core:default", "core:event:allow-listen", "dialog:default", "opener:default"]
 }

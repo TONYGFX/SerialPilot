@@ -338,7 +338,7 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .about-details dt, .about-details dd { display: flex; align-items: center; margin: 0; font-size: 10px; }
 .about-details dt { color: #718189; }
 .about-details dd { color: #c9d8d4; font-family: var(--serial-mono-font); }
-.about-link { overflow: hidden; color: #71c991; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
+.about-link { overflow: hidden; border: 0; padding: 0; background: transparent; color: #71c991; cursor: pointer; font: inherit; text-align: left; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
 .about-link:hover { color: #b9e8c7; text-decoration: underline; }
 .settings-section-title { margin-bottom: 18px; }
 .settings-section-title h2 { margin-bottom: 6px; font-size: 13px; }
