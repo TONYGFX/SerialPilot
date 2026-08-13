@@ -210,8 +210,6 @@ select, input:not([type="checkbox"]) { height: 31px; padding: 0 8px; }
 .stepper-button { display: flex; align-items: center; justify-content: center; min-width: 0; padding: 0; border: 0; background: #1d292d; color: #91a0a6; line-height: 1; }
 .stepper-button + .stepper-button { border-top: 1px solid #35434a; }
 .stepper-button:hover { background: #263f31; color: #c8ead2; }
-.debug-mode-check { display: flex; align-items: center; gap: 6px; color: #aebdc1; font-size: 12px; }
-.debug-mode-check span { color: #718187; }
 .field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
 .signal-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; margin: 2px 0 14px; }
 .signal-indicator, .signal-toggle { display: inline-flex; align-items: center; justify-content: center; height: 28px; border: 1px solid #35434a; border-radius: 3px; background: #263034; color: #c5d0d2; font-size: 10px; }
@@ -441,8 +439,6 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .app-shell[data-theme="light"] .stepper-button { background: #f2f6f7; color: #587078; }
 .app-shell[data-theme="light"] .stepper-button + .stepper-button { border-color: #bdcbcf; }
 .app-shell[data-theme="light"] .stepper-button:hover { background: #e7f5eb; color: #1e7044; }
-.app-shell[data-theme="light"] .debug-mode-check { color: #40545b; }
-.app-shell[data-theme="light"] .debug-mode-check span { color: #74868c; }
 .app-shell[data-theme="light"] .tool-button, .app-shell[data-theme="light"] .icon-button, .app-shell[data-theme="light"] .secondary { border-color: #bdcbcf; background: #f2f6f7; color: #456068; }
 .app-shell[data-theme="light"] .tool-button:hover, .app-shell[data-theme="light"] .icon-button:hover, .app-shell[data-theme="light"] .secondary:hover { border-color: #44a66b; background: #e7f5eb; color: #1e7044; }
 .app-shell[data-theme="light"] .signal-indicator, .app-shell[data-theme="light"] .signal-toggle { border-color: #bdcbcf; background: #f2f6f7; color: #405a62; }

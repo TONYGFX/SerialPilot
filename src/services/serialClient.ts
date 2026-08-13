@@ -27,8 +27,3 @@ export async function executeSerialCommand<Result>(command: unknown): Promise<Re
 export async function configureMcpHttp(config: McpHttpPreferences): Promise<McpHttpStatus> {
   return invoke<McpHttpStatus>("configure_mcp_http", { config });
 }
-
-/** Returns whether this desktop binary includes development-only mock serial support. */
-export async function isDebugModeAvailable(): Promise<boolean> {
-  return invoke<boolean>("debug_mode_available");
-}

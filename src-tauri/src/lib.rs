@@ -40,11 +40,6 @@ async fn configure_mcp_http(
     configure_server(&runtime.0, core.0.clone(), config).await
 }
 
-#[tauri::command]
-fn debug_mode_available() -> bool {
-    cfg!(debug_assertions)
-}
-
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -61,11 +56,7 @@ pub fn run() {
             app.manage(McpRuntime(tokio::sync::Mutex::new(None)));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            execute_serial,
-            configure_mcp_http,
-            debug_mode_available
-        ])
+        .invoke_handler(tauri::generate_handler![execute_serial, configure_mcp_http])
         .run(tauri::generate_context!())
         .expect("failed to run SerialPilot");
 }
