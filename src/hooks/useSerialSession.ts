@@ -34,6 +34,7 @@ type SerialEventHandlers = {
   setWaveSamples: StateSetter<WaveSample[]>;
   setWaveChannels: StateSetter<WaveChannel[]>;
   setFileProgress: StateSetter<FileSendProgress | undefined>;
+  cancelledFileActionRef: MutableRefObject<string | undefined>;
   refreshPorts: () => Promise<void>;
   refreshStatus: () => Promise<void>;
   setError: StateSetter<string | undefined>;
@@ -105,6 +106,7 @@ export function useSerialSession(): SerialSession {
   const pausedRef = useRef(false);
   const waveformPausedRef = useRef(true);
   const channelsRef = useRef<WaveChannel[]>([]);
+  const cancelledFileActionRef = useRef<string>();
   const manuallyClosedRef = useRef(false);
   const hasConnectedRef = useRef(false);
   const sessionId = status.session_id;
@@ -133,7 +135,7 @@ export function useSerialSession(): SerialSession {
     }
   }, []);
 
-  useSerialEvents({ pausedRef, waveformPausedRef, channelsRef, setFrames, setWaveSamples, setWaveChannels: setWaveChannelsState, setFileProgress, refreshPorts, refreshStatus, setError });
+  useSerialEvents({ pausedRef, waveformPausedRef, channelsRef, cancelledFileActionRef, setFrames, setWaveSamples, setWaveChannels: setWaveChannelsState, setFileProgress, refreshPorts, refreshStatus, setError });
   useEffect(() => {
     void executeSerialCommand<{ type: "waveform_channels"; channels: WaveChannel[] }>({ type: "waveform_list_channels" })
       .then((result) => setWaveChannelsState(result.channels))
@@ -191,6 +193,7 @@ export function useSerialSession(): SerialSession {
   const sendFile = async (filePath: string, chunkSize: number, intervalMs: number) => {
     if (!sessionId) return;
     const actionId = crypto.randomUUID();
+    cancelledFileActionRef.current = undefined;
     setError(undefined);
     try {
       const result = await executeSerialCommand<{ type: "file_send_started"; action_id: string; file_size: number; chunk_size: number }>({ type: "send_file", session_id: sessionId, file_path: filePath, protocol: fileProtocol, chunk_size: chunkSize, interval_ms: intervalMs, timeout_ms: 1000, action_id: actionId });
@@ -202,6 +205,7 @@ export function useSerialSession(): SerialSession {
   const cancelFileSend = async () => {
     if (!fileProgress || fileProgress.completed || fileProgress.cancelled) return;
     try {
+      cancelledFileActionRef.current = fileProgress.action_id;
       await executeSerialCommand({ type: "cancel_send_file", action_id: fileProgress.action_id });
       // Hide the transient progress panel immediately; the worker will emit a
       // final cancelled event, which is handled defensively below as well.
@@ -215,22 +219,22 @@ export function useSerialSession(): SerialSession {
 }
 
 function useSerialEvents(handlers: SerialEventHandlers) {
-  const { pausedRef, waveformPausedRef, channelsRef, setFrames, setWaveSamples, setWaveChannels, setFileProgress, refreshPorts, refreshStatus, setError } = handlers;
+  const { pausedRef, waveformPausedRef, channelsRef, cancelledFileActionRef, setFrames, setWaveSamples, setWaveChannels, setFileProgress, refreshPorts, refreshStatus, setError } = handlers;
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let isDisposed = false;
-    void subscribeToSerialEvents({ pausedRef, waveformPausedRef, channelsRef, setFrames, setWaveSamples, setWaveChannels, setFileProgress, refreshPorts, refreshStatus, setError }).then((listener) => {
+    void subscribeToSerialEvents({ pausedRef, waveformPausedRef, channelsRef, cancelledFileActionRef, setFrames, setWaveSamples, setWaveChannels, setFileProgress, refreshPorts, refreshStatus, setError }).then((listener) => {
       if (isDisposed) listener();
       else unlisten = listener;
     });
     return () => { isDisposed = true; unlisten?.(); };
-  }, [channelsRef, pausedRef, refreshPorts, refreshStatus, setError, setFileProgress, setFrames, setWaveChannels, setWaveSamples, waveformPausedRef]);
+  }, [cancelledFileActionRef, channelsRef, pausedRef, refreshPorts, refreshStatus, setError, setFileProgress, setFrames, setWaveChannels, setWaveSamples, waveformPausedRef]);
 }
 
 async function subscribeToSerialEvents(handlers: SerialEventHandlers): Promise<() => void> {
-  const { pausedRef, waveformPausedRef, channelsRef, setFrames, setWaveSamples, setWaveChannels, setFileProgress, refreshPorts, refreshStatus, setError } = handlers;
+  const { pausedRef, waveformPausedRef, channelsRef, cancelledFileActionRef, setFrames, setWaveSamples, setWaveChannels, setFileProgress, refreshPorts, refreshStatus, setError } = handlers;
   try {
-    const unlisten = await listen<SerialEvent>("serial-event", ({ payload: event }) => handleSerialEvent(event, pausedRef, waveformPausedRef, channelsRef, setFrames, setWaveSamples, setWaveChannels, setFileProgress, refreshStatus));
+    const unlisten = await listen<SerialEvent>("serial-event", ({ payload: event }) => handleSerialEvent(event, pausedRef, waveformPausedRef, channelsRef, cancelledFileActionRef, setFrames, setWaveSamples, setWaveChannels, setFileProgress, refreshStatus));
     await refreshPorts();
     await refreshStatus();
     return unlisten;
@@ -240,7 +244,7 @@ async function subscribeToSerialEvents(handlers: SerialEventHandlers): Promise<(
   }
 }
 
-function handleSerialEvent(event: SerialEvent, pausedRef: MutableRefObject<boolean>, waveformPausedRef: MutableRefObject<boolean>, channelsRef: MutableRefObject<WaveChannel[]>, setFrames: StateSetter<SerialFrame[]>, setWaveSamples: StateSetter<WaveSample[]>, setWaveChannels: StateSetter<WaveChannel[]>, setFileProgress: StateSetter<FileSendProgress | undefined>, refreshStatus: () => Promise<void>) {
+function handleSerialEvent(event: SerialEvent, pausedRef: MutableRefObject<boolean>, waveformPausedRef: MutableRefObject<boolean>, channelsRef: MutableRefObject<WaveChannel[]>, cancelledFileActionRef: MutableRefObject<string | undefined>, setFrames: StateSetter<SerialFrame[]>, setWaveSamples: StateSetter<WaveSample[]>, setWaveChannels: StateSetter<WaveChannel[]>, setFileProgress: StateSetter<FileSendProgress | undefined>, refreshStatus: () => Promise<void>) {
   if (event.kind === "frame") {
     const frame = event.detail as SerialFrame;
     appendEventFrame(frame, pausedRef.current, setFrames);
@@ -248,6 +252,10 @@ function handleSerialEvent(event: SerialEvent, pausedRef: MutableRefObject<boole
   }
   if (event.kind === "file_progress") {
     const progress = event.detail as FileSendProgress;
+    if (cancelledFileActionRef.current === progress.action_id) {
+      if (progress.cancelled) setFileProgress(undefined);
+      return;
+    }
     setFileProgress(progress.cancelled ? undefined : progress);
   }
   if (event.kind === "command_completed" && event.action.startsWith("waveform.")) {

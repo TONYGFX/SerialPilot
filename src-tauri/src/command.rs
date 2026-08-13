@@ -1096,17 +1096,19 @@ impl SerialCore {
             .await;
             let _ = file_send.lock().await.take();
             if let Err(error) = result {
+                let cancelled =
+                    error.1 || cancellation_requested(&file_cancel, &action_for_task).await;
                 emit_file_progress(
                     &events,
                     &audit,
                     FileProgress {
-                        action_id: action_for_task,
+                        action_id: action_for_task.clone(),
                         file_path: file_path_for_event,
                         file_size,
                         sent_bytes: error.0,
                         chunk_size,
                         completed: false,
-                        cancelled: error.1,
+                        cancelled,
                     },
                 );
             }
@@ -1471,6 +1473,9 @@ async fn stream_file(
         {
             return Err((sent_bytes, cancellation_requested(cancel, action_id).await));
         }
+    }
+    if cancellation_requested(cancel, action_id).await {
+        return Err((sent_bytes, true));
     }
     emit_file_progress(
         events,
