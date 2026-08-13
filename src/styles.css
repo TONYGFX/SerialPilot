@@ -318,8 +318,12 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .mcp-dialog-content .check, .mcp-dialog-content label { margin: 0; }
 .mcp-dialog-content .check { font-size: 11px; }
 .settings-apply { width: auto; min-width: 112px; justify-self: start; padding: 0 12px; }
-.mcp-endpoint, .settings-error { margin: 0; overflow: hidden; font: 10px ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
-.mcp-endpoint { color: #71c991; }
+.mcp-endpoint { display: grid; grid-template-columns: auto minmax(0, 1fr) 27px; align-items: center; gap: 7px; min-width: 0; min-height: 29px; padding: 0 4px 0 8px; border: 1px solid #355744; background: #17271e; color: #71c991; font: 10px ui-monospace, monospace; }
+.mcp-endpoint span { color: #a7cbb1; font: 10px system-ui, sans-serif; }
+.mcp-endpoint code { overflow: hidden; color: inherit; font: inherit; text-overflow: ellipsis; white-space: nowrap; }
+.mcp-copy { display: grid; width: 25px; height: 25px; place-items: center; padding: 0; border: 0; border-left: 1px solid #355744; background: transparent; color: #a7cbb1; }
+.mcp-copy:hover { background: #264a32; color: #e1f5e5; }
+.settings-error { margin: 0; overflow: hidden; font: 10px ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .settings-error { color: #e88e84; }
 .mcp-stdio-note { margin-top: 4px; padding-top: 14px; border-top: 1px solid #2b373c; }
 .mcp-stdio-note h3 { margin: 0 0 6px; color: #c7d5d8; font-size: 11px; }
@@ -506,7 +510,10 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .app-shell[data-theme="light"] .mcp-dialog { border-color: #c4d0d3; background: #f8fafb; box-shadow: 0 18px 48px rgb(36 56 63 / 24%); }
 .app-shell[data-theme="light"] .app-settings-header { border-color: #d7e0e2; background: #fff; }
 .app-shell[data-theme="light"] .settings-section-title p, .app-shell[data-theme="light"] .settings-note { color: #687f86; }
-.app-shell[data-theme="light"] .mcp-endpoint { color: #27854d; }
+.app-shell[data-theme="light"] .mcp-endpoint { border-color: #a6d1b4; background: #f1faf3; color: #27854d; }
+.app-shell[data-theme="light"] .mcp-endpoint span, .app-shell[data-theme="light"] .mcp-copy { color: #3c7750; }
+.app-shell[data-theme="light"] .mcp-copy { border-color: #a6d1b4; }
+.app-shell[data-theme="light"] .mcp-copy:hover { background: #daf0df; color: #1c673a; }
 .app-shell[data-theme="light"] .settings-error { color: #a83d34; }
 .app-shell[data-theme="light"] .mcp-stdio-note { border-color: #d7e0e2; }
 .app-shell[data-theme="light"] .mcp-stdio-note h3 { color: #273b41; }

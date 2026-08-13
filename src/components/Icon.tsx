@@ -13,6 +13,7 @@ export type IconName =
   | "chevronDown"
   | "chevronUp"
   | "close"
+  | "copy"
   | "download"
   | "file"
   | "moon"
@@ -35,6 +36,7 @@ const ICON_PATHS: Record<IconName, JSX.Element> = {
   chevronDown: <path d="m5 7 4 4 4-4" />,
   chevronUp: <path d="m5 11 4-4 4 4" />,
   close: <path d="m5 4 8 9M13 4l-8 9" />,
+  copy: <><rect x="6" y="5" width="7" height="8" rx=".8" /><path d="M4 11V3.8c0-.45.35-.8.8-.8H11" /></>,
   download: <><path d="M9 3v8M6 8l3 3 3-3M4 14h10" /></>,
   file: <><path d="M5 2.5h5l3 3v9H5z" /><path d="M10 2.5v3h3M7 9h4M7 11.5h4" /></>,
   moon: <path d="M12.7 13.5A5.8 5.8 0 0 1 5.4 6.2 5.9 5.9 0 1 0 12.7 13.5Z" />,
