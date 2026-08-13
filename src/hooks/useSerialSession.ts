@@ -204,14 +204,17 @@ export function useSerialSession(): SerialSession {
   };
   const cancelFileSend = async () => {
     if (!fileProgress || fileProgress.completed || fileProgress.cancelled) return;
+    const actionId = fileProgress.action_id;
+    cancelledFileActionRef.current = actionId;
+    // Close the transient UI before awaiting the backend. The backend may be
+    // finishing concurrently, so a "no matching task" response is harmless.
+    setFileProgress(undefined);
     try {
-      cancelledFileActionRef.current = fileProgress.action_id;
-      await executeSerialCommand({ type: "cancel_send_file", action_id: fileProgress.action_id });
-      // Hide the transient progress panel immediately; the worker will emit a
-      // final cancelled event, which is handled defensively below as well.
-      setFileProgress(undefined);
+      await executeSerialCommand({ type: "cancel_send_file", action_id: actionId });
     } catch (cause) {
-      setError(String(cause));
+      if (!String(cause).includes("no matching file send is active")) {
+        setError(String(cause));
+      }
     }
   };
 

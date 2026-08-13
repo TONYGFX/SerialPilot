@@ -2057,6 +2057,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn xmodem_without_handshake_can_be_cancelled_immediately() {
+        let core = core();
+        let (session, _) = open(&core).await;
+        let path = std::env::temp_dir().join(format!(
+            "serialpilot-xmodem-cancel-{}.bin",
+            std::process::id()
+        ));
+        tokio::fs::write(&path, vec![7u8; 256]).await.unwrap();
+        let action_id = "xmodem-cancel-test".to_string();
+        core.execute(SerialCommand::SendFile {
+            session_id: session,
+            file_path: path.to_string_lossy().into_owned(),
+            protocol: FileTransferProtocol::Xmodem,
+            chunk_size: 128,
+            interval_ms: 0,
+            timeout_ms: Some(10_000),
+            action_id: Some(action_id.clone()),
+        })
+        .await
+        .unwrap();
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        let started = tokio::time::Instant::now();
+        core.execute(SerialCommand::CancelSendFile { action_id })
+            .await
+            .unwrap();
+        assert!(started.elapsed() < Duration::from_millis(100));
+        assert!(core.file_send.lock().await.is_none());
+        assert!(core.file_task.lock().await.is_none());
+        tokio::fs::remove_file(path).await.unwrap();
+    }
+
+    #[tokio::test]
     async fn ui_and_mcp_share_dispatch_path() {
         let core = core();
         let ui_result = dispatch_command(&core, SerialCommand::ListPorts)
