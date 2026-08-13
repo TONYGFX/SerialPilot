@@ -9,6 +9,8 @@ import type { McpHttpPreferences, McpHttpStatus, Theme } from "../types/settings
 import { NumberStepper } from "./FormControls";
 import { Icon } from "./Icon";
 
+const APP_VERSION = "0.1.2";
+
 type McpDialogProps = {
   theme: Theme;
   onThemeChange: (theme: Theme) => void;
@@ -21,7 +23,7 @@ type McpDialogProps = {
 
 /** Renders MCP transport settings and provides explicit runtime controls. */
 export function McpDialog({ theme, onThemeChange, preferences, runtimeStatus, onChange, onApply, onClose }: McpDialogProps) {
-  const [activePage, setActivePage] = useState<"general" | "mcp">("general");
+  const [activePage, setActivePage] = useState<"general" | "mcp" | "about">("general");
   const [error, setError] = useState<string>();
   const [isApplying, setIsApplying] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -68,6 +70,7 @@ export function McpDialog({ theme, onThemeChange, preferences, runtimeStatus, on
         <nav className="settings-nav" aria-label="设置分类">
           <button type="button" className={activePage === "general" ? "selected" : ""} aria-current={activePage === "general" ? "page" : undefined} onClick={() => setActivePage("general")}><Icon name="settings" size={14} />通用</button>
           <button type="button" className={activePage === "mcp" ? "selected" : ""} aria-current={activePage === "mcp" ? "page" : undefined} onClick={() => setActivePage("mcp")}><span className="settings-nav-dot" />MCP</button>
+          <button type="button" className={activePage === "about" ? "selected" : ""} aria-current={activePage === "about" ? "page" : undefined} onClick={() => setActivePage("about")}><span className="settings-nav-mark">i</span>关于</button>
         </nav>
         <div className="settings-page">
           {activePage === "general" && <section className="settings-group"><div className="settings-section-title"><h2>外观</h2><p>选择工作区的显示主题；跟随系统会在操作系统切换外观时自动更新。</p></div><div className="settings-theme-options" role="group" aria-label="界面主题"><button type="button" className={theme === "system" ? "selected" : ""} aria-pressed={theme === "system"} onClick={() => onThemeChange("system")}>跟随系统</button><button type="button" className={theme === "dark" ? "selected" : ""} aria-pressed={theme === "dark"} onClick={() => onThemeChange("dark")}>深色</button><button type="button" className={theme === "light" ? "selected" : ""} aria-pressed={theme === "light"} onClick={() => onThemeChange("light")}>浅色</button></div></section>}
@@ -81,6 +84,7 @@ export function McpDialog({ theme, onThemeChange, preferences, runtimeStatus, on
             {error && <p className="settings-error" role="alert">{error}</p>}
             <section className="mcp-stdio-note"><h3>stdio</h3><p>由外部 MCP 客户端启动 `serialpilot-mcp`。协议消息使用 stdout，诊断日志只写入 stderr。</p></section>
           </section>}
+          {activePage === "about" && <section className="about-page"><div className="settings-section-title"><h2>SerialPilot</h2><p>跨平台桌面端 AI 串口助手。</p></div><dl className="about-details"><div><dt>版本</dt><dd>{APP_VERSION}</dd></div><div><dt>开发者</dt><dd>TONYGFX</dd></div></dl></section>}
         </div>
       </div>
     </section>
