@@ -4,7 +4,7 @@
  * connected device until the relevant runtime service is enabled.
  */
 
-export type Theme = "dark" | "light";
+export type Theme = "dark" | "light" | "system";
 
 export type McpHttpPreferences = {
   enabled: boolean;
@@ -22,6 +22,6 @@ export type ApplicationPreferences = {
 };
 
 export const DEFAULT_APPLICATION_PREFERENCES: ApplicationPreferences = {
-  theme: "dark",
+  theme: "system",
   mcpHttp: { enabled: false, port: 3030 },
 };

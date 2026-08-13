@@ -25,6 +25,7 @@ export function App() {
   const [preferences, setPreferences] = useState<ApplicationPreferences>(readPreferences);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [mcpStatus, setMcpStatus] = useState<McpHttpStatus>({ enabled: false });
+  const resolvedTheme = useResolvedTheme(preferences.theme);
   const serial = useSerialSession();
   const activity = useMemo(() => serial.frames.map((frame) => ({ ...frame, local: new Date(frame.timestamp_ms).toLocaleTimeString() })), [serial.frames]);
   const sessionLabel = serial.status.connected ? `已连接 · ${serial.status.session_id?.slice(0, 8)}` : "未连接";
@@ -40,7 +41,7 @@ export function App() {
     setMcpStatus(status);
   };
 
-  return <main className="app-shell" data-theme={preferences.theme}>
+  return <main className="app-shell" data-theme={resolvedTheme}>
     <header>
       <div><p className="eyebrow">AI SERIAL CONSOLE</p><h1>SerialPilot</h1></div>
       <nav className="view-tabs" aria-label="工作区视图"><button type="button" className={view === "terminal" ? "selected" : ""} aria-selected={view === "terminal"} onClick={() => setView("terminal")}>终端</button><button type="button" className={view === "waveform" ? "selected" : ""} aria-selected={view === "waveform"} onClick={() => setView("waveform")}>波形</button></nav>
@@ -68,7 +69,7 @@ function readPreferences(): ApplicationPreferences {
       };
     }
     const candidate = JSON.parse(saved) as Partial<ApplicationPreferences>;
-    const theme: Theme = candidate.theme === "light" ? "light" : "dark";
+    const theme: Theme = candidate.theme === "light" || candidate.theme === "dark" || candidate.theme === "system" ? candidate.theme : "system";
     const port = candidate.mcpHttp?.port;
     return {
       theme,
@@ -80,4 +81,17 @@ function readPreferences(): ApplicationPreferences {
   } catch {
     return DEFAULT_APPLICATION_PREFERENCES;
   }
+}
+
+function useResolvedTheme(theme: Theme): "dark" | "light" {
+  const [systemTheme, setSystemTheme] = useState<"dark" | "light">(() => window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    const updateTheme = (event: MediaQueryListEvent) => setSystemTheme(event.matches ? "dark" : "light");
+    mediaQuery.addEventListener("change", updateTheme);
+    return () => mediaQuery.removeEventListener("change", updateTheme);
+  }, []);
+
+  return theme === "system" ? systemTheme : theme;
 }
