@@ -12,7 +12,7 @@ import { SettingsPanel } from "./components/SettingsPanel";
 import { TerminalPanel } from "./components/TerminalPanel";
 import { WaveformPanel } from "./components/WaveformPanel";
 import { useSerialSession } from "./hooks/useSerialSession";
-import { configureMcpHttp } from "./services/serialClient";
+import { configureMcpHttp, isDebugModeAvailable } from "./services/serialClient";
 import { DEFAULT_APPLICATION_PREFERENCES, type ApplicationPreferences, type McpHttpStatus, type Theme } from "./types/settings";
 
 type WorkspaceView = "terminal" | "waveform";
@@ -27,8 +27,8 @@ export function App() {
   const [mcpOpen, setMcpOpen] = useState(false);
   const [mcpStatus, setMcpStatus] = useState<McpHttpStatus>({ enabled: false });
   const [debugMode, setDebugMode] = useState(false);
+  const [debugAvailable, setDebugAvailable] = useState(false);
   const serial = useSerialSession();
-  const debugAvailable = Boolean(import.meta.env.DEV);
   const visiblePorts = debugMode ? serial.ports : serial.ports.filter((port) => !port.id.startsWith(MOCK_PORT_PREFIX));
   const activity = useMemo(() => serial.frames.map((frame) => ({ ...frame, local: new Date(frame.timestamp_ms).toLocaleTimeString() })), [serial.frames]);
   const sessionLabel = serial.status.connected ? `已连接 · ${serial.status.session_id?.slice(0, 8)}` : "未连接";
@@ -38,6 +38,9 @@ export function App() {
   useEffect(() => {
     if (!preferences.mcpHttp.enabled) return;
     void configureMcpHttp(preferences.mcpHttp).then(setMcpStatus).catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    void isDebugModeAvailable().then(setDebugAvailable).catch(() => setDebugAvailable(false));
   }, []);
   const applyMcp = async () => {
     const status = await configureMcpHttp(preferences.mcpHttp);
