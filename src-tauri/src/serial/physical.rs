@@ -8,7 +8,9 @@ use std::{
 };
 
 use async_trait::async_trait;
-use serialport::{DataBits, FlowControl, Parity, SerialPort, StopBits};
+use serialport::{
+    DataBits, FlowControl, Parity, SerialPort, SerialPortInfo, SerialPortType, StopBits,
+};
 use tokio::sync::mpsc;
 
 use crate::{
@@ -28,7 +30,7 @@ impl SerialAdapter for PhysicalSerialAdapter {
                     .into_iter()
                     .map(|port| PortInfo {
                         id: port.port_name.clone(),
-                        display_name: port.port_name,
+                        display_name: format_port_display_name(&port),
                         is_mock: false,
                     })
                     .collect()
@@ -78,6 +80,38 @@ impl SerialAdapter for PhysicalSerialAdapter {
         });
         Ok(AdapterConnection { incoming, outgoing })
     }
+}
+
+fn format_port_display_name(port: &SerialPortInfo) -> String {
+    let description = match &port.port_type {
+        SerialPortType::UsbPort(info) => info.product.as_deref().or(info.manufacturer.as_deref()),
+        _ => None,
+    }
+    .map(|value| trim_port_suffix(value, &port.port_name))
+    .filter(|value| !value.is_empty());
+
+    description
+        .map(|value| format!("{} · {}", port.port_name, value))
+        .unwrap_or_else(|| port.port_name.clone())
+}
+
+fn trim_port_suffix(description: &str, port_name: &str) -> String {
+    let trimmed = description.trim();
+    let Some(opening) = trimmed.rfind('(') else {
+        return trimmed.to_string();
+    };
+    let Some(closing) = trimmed[opening..].find(')') else {
+        return trimmed.to_string();
+    };
+    let closing = opening + closing;
+    if trimmed[opening + 1..closing]
+        .trim()
+        .eq_ignore_ascii_case(port_name)
+        && trimmed[closing + 1..].trim().is_empty()
+    {
+        return trimmed[..opening].trim().to_string();
+    }
+    trimmed.to_string()
 }
 
 fn run_reader(mut port: Box<dyn SerialPort>, incoming_tx: mpsc::Sender<Vec<u8>>) {
@@ -141,4 +175,21 @@ fn parse_flow_control(value: &str) -> Result<FlowControl, CoreError> {
 
 fn adapter_error(error: serialport::Error) -> CoreError {
     CoreError::Adapter(error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trims_repeated_port_suffix_from_windows_description() {
+        assert_eq!(
+            trim_port_suffix("USB-SERIAL CH340 (COM3)", "COM3"),
+            "USB-SERIAL CH340"
+        );
+        assert_eq!(
+            trim_port_suffix("USB-SERIAL CH340", "COM3"),
+            "USB-SERIAL CH340"
+        );
+    }
 }
