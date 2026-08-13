@@ -10,8 +10,10 @@ import { NumberStepper } from "./FormControls";
 import { Icon } from "./Icon";
 
 const APP_VERSION = "0.1.2";
+type SettingsPage = "general" | "mcp" | "about";
 
 type McpDialogProps = {
+  initialPage: SettingsPage;
   theme: Theme;
   onThemeChange: (theme: Theme) => void;
   preferences: McpHttpPreferences;
@@ -21,9 +23,9 @@ type McpDialogProps = {
   onClose: () => void;
 };
 
-/** Renders MCP transport settings and provides explicit runtime controls. */
-export function McpDialog({ theme, onThemeChange, preferences, runtimeStatus, onChange, onApply, onClose }: McpDialogProps) {
-  const [activePage, setActivePage] = useState<"general" | "mcp" | "about">("general");
+/** Renders application settings, including MCP transport controls. */
+export function McpDialog({ initialPage, theme, onThemeChange, preferences, runtimeStatus, onChange, onApply, onClose }: McpDialogProps) {
+  const [activePage, setActivePage] = useState<SettingsPage>(initialPage);
   const [error, setError] = useState<string>();
   const [isApplying, setIsApplying] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -35,6 +37,10 @@ export function McpDialog({ theme, onThemeChange, preferences, runtimeStatus, on
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [onClose]);
+
+  useEffect(() => {
+    setActivePage(initialPage);
+  }, [initialPage]);
 
   const update = (change: Partial<McpHttpPreferences>) => onChange({ ...preferences, ...change });
   const apply = async () => {

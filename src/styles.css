@@ -71,6 +71,11 @@ header {
   color: #9baab0;
   font-size: 11px;
 }
+.mcp-status { display: flex; align-items: center; gap: 7px; min-height: 28px; padding: 0 9px; border: 1px solid #35434a; border-radius: 2px; background: #1d292d; color: #9baab0; font-size: 11px; }
+.mcp-status:hover { border-color: #50b977; background: #263f31; color: #d3edda; }
+.mcp-status i { width: 7px; height: 7px; border-radius: 50%; background: #76848a; }
+.mcp-status.online { border-color: #35734b; background: #20332a; color: #b9ddc2; }
+.mcp-status.online i { background: #55c778; }
 .connection { justify-self: end; }
 .header-status { display: flex; align-items: center; justify-self: end; gap: 8px; }
 .header-status .connection { justify-self: auto; }
@@ -433,6 +438,11 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .app-shell[data-theme="light"] .connection i { background: #8a999e; }
 .app-shell[data-theme="light"] .connection.online { border-color: #80bb91; background: #f4fbf6; color: #237247; }
 .app-shell[data-theme="light"] .connection.online i { background: #3fa866; }
+.app-shell[data-theme="light"] .mcp-status { border-color: #c8d4d7; background: #fff; color: #52666d; }
+.app-shell[data-theme="light"] .mcp-status:hover { border-color: #59a675; background: #edf8f0; color: #237247; }
+.app-shell[data-theme="light"] .mcp-status i { background: #8a999e; }
+.app-shell[data-theme="light"] .mcp-status.online { border-color: #80bb91; background: #f4fbf6; color: #237247; }
+.app-shell[data-theme="light"] .mcp-status.online i { background: #3fa866; }
 .app-shell[data-theme="light"] .settings-button { border-color: #c8d4d7; background: #fff; color: #53676d; }
 .app-shell[data-theme="light"] .settings-button:hover { border-color: #59a675; background: #edf8f0; color: #237247; }
 .app-shell[data-theme="light"] .settings-theme-options { border-color: #bdcbcf; }
