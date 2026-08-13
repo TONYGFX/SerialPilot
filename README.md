@@ -1,54 +1,90 @@
-# SerialPilot
+<p align="center">
+  <img src="src-tauri/icons/icon.png" alt="SerialPilot Logo" width="128" />
+</p>
 
-SerialPilot 是一个跨平台桌面端 AI 串口助手。它使用 Tauri 2、React、TypeScript 和 Rust 构建，串口核心、UI 和 MCP 共享同一套结构化命令与事件路径。
+<h1 align="center">SerialPilot</h1>
 
-> 当前发布版 `v0.1.2` 默认使用系统真实串口适配器，Mock 适配器仅保留在测试代码中。
+<p align="center">跨平台桌面端 AI 串口助手</p>
 
-## 功能
+<p align="center">
+  <a href="https://github.com/TONYGFX/SerialPilot">GitHub</a>
+  ·
+  <a href="LICENSE">MIT License</a>
+</p>
 
-- 桌面端串口工作区：端口、波特率、数据位、校验位、停止位和流控配置。
-- 文本、HEX、Base64 发送，以及文件发送进度和取消。
-- TX/RX 实时日志，支持暂停、清空、显示格式切换和接收数据保存。
-- 后台接收任务、游标读取、固定容量 RX 缓冲和丢弃帧提示。
-- 有界的 `wait_for`、`exchange`、批量发送和批量事务操作。
-- 多通道波形：自定义通道名称和颜色，悬浮查看采样值，拖拽/滚轮平移，`Ctrl + 滚轮` 缩放横轴，一键跟随最新数据。
-- MCP 工具：串口控制和波形通道控制均经过 Rust 串口核心，不绕过核心访问硬件。
-- MCP stdio 和 Streamable HTTP 两种独立服务；桌面程序内置 HTTP 服务开关。
-- 深色和浅色桌面主题。
+SerialPilot 面向嵌入式开发、硬件调试和串口自动化场景。它将可靠的 Rust 串口核心、专业桌面工作区和 MCP 工具接口组合在一起，让用户和 AI 都通过同一套结构化命令操作串口。
 
-## 架构边界
+## 产品特点
+
+- 原生桌面工作区：可调整大小的配置栏、终端日志区和波形工作区，窗口变化时自动填充客户区。
+- 可靠串口核心：后台持续接收、固定容量 RX 缓冲、游标读取、超时等待和请求-响应事务。
+- 完整数据保留：发送和接收均保留原始字节，同时提供文本、HEX 和 Base64 数据处理。
+- 多通道波形：自定义通道名称和颜色，支持跟随最新数据、拖拽平移、横轴缩放和悬浮查看采样值。
+- 文件发送：支持文件选择、传输协议选择、进度显示、取消传输和 TXT 数据保存。
+- AI 原生控制：MCP 通过结构化工具完成端口选择、配置、发送、接收和波形通道管理。
+- 深色、浅色和跟随系统主题。
+
+## 截图
+
+项目界面以紧凑的桌面工作区为核心，适合连续接收、对比日志和调试设备状态。
+
+## 架构
 
 ```text
 React UI ─┐
-MCP      ─┼─> 统一 Command/Event ─> Rust SerialCore ─> SerialAdapter
+MCP      ─┼─> 统一 Command / Event ─> Rust SerialCore ─> SerialAdapter ─> 串口设备
 审计记录 ─┘
 ```
 
 - 前端不直接访问物理串口。
-- MCP 不绕过串口核心。
-- 只有 Rust 串口适配器可以访问串口设备。
-- 串口打开后，后台读取任务持续运行；`read_since`、`wait_for` 和 `exchange` 都从接收缓冲区读取。
+- MCP 不绕过串口核心访问硬件。
+- 只有 Rust 串口适配器可以访问物理串口。
+- 串口打开后，后台读取任务持续运行；`read_since`、`wait_for` 和 `exchange` 从接收缓冲区读取数据。
 - 原始字节、文本显示和波形解析结果分开保存，解析不会覆盖原始数据。
-- stdio MCP 的日志只写入 stderr，不污染 stdout 协议流。
+- stdio MCP 的协议消息写入 stdout，诊断日志写入 stderr。
 
-## 快速开始
+## MCP
 
-### 开发环境
+SerialPilot 支持两种 MCP 连接方式：
 
-需要 Node.js 20+、Rust stable、Cargo 和 Tauri 2 在 Windows 上所需的 WebView2/构建依赖。
+- **stdio**：由 MCP 客户端启动 `serialpilot-mcp`，适合本地桌面 AI 客户端。
+- **Streamable HTTP**：启动 `serialpilot-mcp-http`，或在桌面程序设置中启用本机 HTTP 服务。
+
+桌面程序内置 HTTP 服务默认使用：
+
+```text
+http://127.0.0.1:3030/mcp
+```
+
+核心工具包括：
+
+- 串口：`serial.list_ports`、`serial.open`、`serial.configure`、`serial.status`、`serial.send`
+- 接收：`serial.read_since`、`serial.wait_for`、`serial.exchange`
+- 批量和连接：`serial.send_batch`、`serial.exchange_batch`、`serial.wait_for_any`、`serial.monitor_ports`、`serial.reconnect`
+- 波形：`waveform.list_channels`、`waveform.add_channel`、`waveform.update_channel`、`waveform.remove_channel`、`waveform.clear_samples`
+
+当前 HTTP 实现使用 Streamable HTTP，不使用 SSE；SSE/实时事件流仅用于桌面端内部状态同步。
+
+## 下载与运行
+
+Windows 用户下载发布页中的 `serialpilot.exe` 即可运行。`serialpilot-mcp.exe` 和 `serialpilot-mcp-http.exe` 是给需要独立 MCP 服务的用户使用的辅助程序，不是桌面 UI。
+
+当前版本：**v0.1.2**
+
+## 从源码运行
+
+开发环境需要：
+
+- Node.js 20+
+- Rust stable 和 Cargo
+- Windows WebView2 与 Tauri 2 构建依赖
 
 ```bash
 npm install
 npm run tauri dev
 ```
 
-前端单独运行：
-
-```bash
-npm run dev
-```
-
-### 验证
+常用验证命令：
 
 ```bash
 npm run build
@@ -57,43 +93,21 @@ cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-## MCP
-
-桌面窗口右上角的 MCP 状态按钮用于启动和停止内置 HTTP 服务。独立服务可使用：
-
-```bash
-cargo run --manifest-path src-tauri/Cargo.toml --bin serialpilot-mcp
-cargo run --manifest-path src-tauri/Cargo.toml --bin serialpilot-mcp-http
-```
-
-HTTP 服务默认监听 `http://127.0.0.1:3030/mcp`，可通过 `SERIALPILOT_MCP_ADDR=127.0.0.1:PORT` 修改地址。当前 HTTP 实现使用 Streamable HTTP，不使用 SSE；SSE/实时界面更新由桌面端本地事件流承担。
-
-核心工具包括：
-
-- `serial.list_ports`、`serial.open`、`serial.status`、`serial.send`
-- `serial.read_since`、`serial.wait_for`、`serial.exchange`
-- `serial.send_batch`、`serial.exchange_batch`、`serial.wait_for_any`
-- `serial.monitor_ports`、`serial.reconnect`
-- `waveform.list_channels`、`waveform.add_channel`、`waveform.update_channel`
-- `waveform.remove_channel`、`waveform.clear_samples`
-
-## Windows 发布版
-
-普通用户只需要桌面程序：
+## 项目结构
 
 ```text
-src-tauri/target/release/serialpilot.exe
+src/                 React、TypeScript 界面与前端状态投影
+src-tauri/src/       Rust 串口核心、命令、事件和 MCP 服务
+src-tauri/src/serial/  串口适配器，包括真实适配器和测试 Mock
+docs/                发布说明与架构文档
+tests/               自动化测试（按模块放置在 src/ 与 Rust 模块旁）
 ```
-
-`serialpilot-mcp.exe` 是 MCP stdio 服务，`serialpilot-mcp-http.exe` 是独立 MCP HTTP 服务；它们不是桌面 UI，只有需要独立 MCP 进程时才使用。
-
-当前发布版本：`0.1.0`
 
 ## 已知限制
 
-- 当前优先支持系统串口枚举和读写；不同平台的设备驱动能力可能不同。
-- 本地会话审计暂存于内存，尚未接入 SQLite 持久化。
-- 无硬件时无法演示真实串口数据，测试中的 Mock 适配器不会进入发行版运行路径。
+- 不同操作系统和设备驱动对串口控制线、独占访问等能力的支持可能不同。
+- 本地会话审计目前主要保留在内存中，SQLite 持久化将在后续版本完善。
+- Mock 适配器仅用于开发和自动化测试，不进入正常发行版运行路径。
 
 ## 许可证
 
