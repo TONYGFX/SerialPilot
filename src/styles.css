@@ -313,7 +313,7 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .send { justify-self: end; width: 82px; min-height: 29px; margin: 7px 14px 9px; padding: 0 12px; font-size: 10px; }
 
 .settings-backdrop { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: 20px; background: rgb(5 9 11 / 58%); }
-.mcp-dialog { display: grid; grid-template-rows: auto minmax(0, 1fr); width: min(560px, 100%); max-height: calc(100dvh - 40px); overflow: hidden; border: 1px solid #3a4a50; border-radius: 3px; background: #141c20; box-shadow: 0 18px 48px rgb(0 0 0 / 48%); }
+.mcp-dialog { display: grid; grid-template-rows: auto minmax(0, 1fr); width: min(560px, 100%); height: min(440px, calc(100dvh - 40px)); overflow: hidden; border: 1px solid #3a4a50; border-radius: 3px; background: #141c20; box-shadow: 0 18px 48px rgb(0 0 0 / 48%); }
 .app-settings-header { display: flex; align-items: center; justify-content: space-between; min-height: 58px; padding: 11px 14px 11px 17px; border-bottom: 1px solid #2b373c; background: #182126; }
 .app-settings-header .eyebrow { margin-bottom: 3px; }
 .app-settings-header h2 { font-size: 14px; }
