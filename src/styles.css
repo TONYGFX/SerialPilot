@@ -269,15 +269,16 @@ select, input:not([type="checkbox"]) { height: 31px; padding: 0 8px; }
 .log-jump-bottom { position: sticky; right: 12px; bottom: 10px; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; margin: -38px 12px 10px auto; border: 1px solid #35434a; border-radius: 50%; background: #1d292d; color: #b6c5c8; box-shadow: 0 4px 12px rgb(0 0 0 / 22%); }
 .log-jump-bottom:hover { border-color: #50b977; background: #263f31; color: #c6e6cf; }
 .empty { padding: 16px 14px; color: #718189; font-size: 11px; line-height: 1.5; }
-.frame { display: grid; grid-template-columns: 62px 32px minmax(0, 1fr) minmax(0, 72px); gap: 8px; align-items: center; min-height: 30px; padding: 5px 14px; border-bottom: 1px solid #202a2f; font-size: 11px; }
+.frame { display: grid; grid-template-columns: 62px 32px minmax(0, 1fr) minmax(0, 72px); gap: 8px; align-items: start; min-height: 30px; padding: 5px 14px; border-bottom: 1px solid #202a2f; font-size: 11px; }
 .frame.display-text, .frame.display-hex { grid-template-columns: 62px 32px minmax(0, 1fr); }
 .frame time, .frame small { color: #718189; font: 10px ui-monospace, monospace; }
-.frame-text { overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.frame-text { min-width: 0; overflow: visible; text-align: right; text-overflow: clip; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .frame-text.text-primary { color: #dce9e3; font: 12px ui-monospace, monospace; text-align: left; }
 .frame b { font-size: 9px; }
 .frame.tx b { color: #e4bb59; }
 .frame.rx b { color: #5fd38d; }
 code { overflow: hidden; color: #d7e5e0; font: 11px ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.frame code { min-width: 0; overflow: visible; text-overflow: clip; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .composer { display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; min-height: 150px; height: 100%; border-top: 0; }
 .composer-head { border-bottom: 0; }
 .segmented { display: inline-flex; overflow: hidden; border: 1px solid #35434a; border-radius: 2px; }
