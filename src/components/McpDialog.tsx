@@ -90,7 +90,7 @@ export function McpDialog({ initialPage, theme, onThemeChange, preferences, runt
             {error && <p className="settings-error" role="alert">{error}</p>}
             <section className="mcp-stdio-note"><h3>stdio</h3><p>由外部 MCP 客户端启动 `serialpilot-mcp`。协议消息使用 stdout，诊断日志只写入 stderr。</p></section>
           </section>}
-          {activePage === "about" && <section className="about-page"><div className="settings-section-title"><h2>SerialPilot</h2><p>跨平台桌面端 AI 串口助手。</p></div><dl className="about-details"><div><dt>版本</dt><dd>{APP_VERSION}</dd></div><div><dt>开发者</dt><dd>TONYGFX</dd></div><div><dt>GitHub</dt><dd><a className="about-link" href="https://github.com/TONYGFX/SerialPilot" target="_blank" rel="noreferrer">github.com/TONYGFX/SerialPilot</a></dd></div></dl></section>}
+          {activePage === "about" && <section className="about-page"><div className="settings-section-title"><h2>SerialPilot</h2><p>跨平台桌面端 AI 串口助手。</p></div><dl className="about-details"><div><dt>版本</dt><dd>{APP_VERSION}</dd></div><div><dt>开发者</dt><dd>TONYGFX</dd></div><div><dt>许可证</dt><dd>MIT License</dd></div><div><dt>版权</dt><dd>Copyright (c) 2026 TONYGFX</dd></div><div><dt>GitHub</dt><dd><a className="about-link" href="https://github.com/TONYGFX/SerialPilot" target="_blank" rel="noreferrer">github.com/TONYGFX/SerialPilot</a></dd></div></dl></section>}
         </div>
       </div>
     </section>
