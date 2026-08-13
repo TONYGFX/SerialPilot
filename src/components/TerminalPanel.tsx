@@ -75,10 +75,21 @@ function FrameLog({ activity, displayMode }: { activity: DisplayFrame[]; display
 }
 
 function FrameRow({ frame, displayMode }: { frame: DisplayFrame; displayMode: ReceiveDisplayMode }) {
-  const text = frame.text_utf8?.trimEnd() || "[非 UTF-8 数据]";
+  const text = formatFrameText(frame.text_utf8, frame.raw_hex);
   const showText = displayMode === "text" || displayMode === "both";
   const showHex = displayMode === "hex" || displayMode === "both";
   return <article className={`frame ${frame.direction} display-${displayMode}`}><time>{frame.local}</time><b>{frame.direction.toUpperCase()}</b>{showHex && <code>{formatHexBytes(frame.raw_hex)}</code>}{showText && <small className={displayMode === "text" ? "frame-text text-primary" : "frame-text"}>{text}</small>}</article>;
+}
+
+function formatFrameText(rawText: string | null | undefined, rawHex: string): string {
+  const text = rawText?.trimEnd() ?? "";
+  // Binary frames often decode to control characters that occupy no visible glyph.
+  // Keep the text view useful by showing the original bytes in that case.
+  const hasVisibleCharacter = [...text].some((character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint === 0x09 || codePoint >= 0x20;
+  });
+  return hasVisibleCharacter ? text : formatHexBytes(rawHex);
 }
 
 function formatHexBytes(rawHex: string): string {
@@ -139,4 +150,4 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024).toFixed(1)} KB`;
 }
 
-export const terminalFormatters = { formatHexBytes, formatHexInput, positionAfterHexCount };
+export const terminalFormatters = { formatHexBytes, formatHexInput, formatFrameText, positionAfterHexCount };

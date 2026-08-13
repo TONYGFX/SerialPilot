@@ -159,7 +159,12 @@ export function useSerialSession(): SerialSession {
       await sendFile(filePath, 256, 10);
       return;
     }
-    try { await executeSerialCommand({ type: "send", session_id: sessionId, encoding, payload, timeout_ms: 1000 }); } catch (cause) { setError(String(cause)); }
+    try {
+      const result = await executeSerialCommand<{ type: "sent"; action_id: string; frame: SerialFrame }>({ type: "send", session_id: sessionId, encoding, payload, timeout_ms: 1000 });
+      // The command result is authoritative for the local TX row. The event is still
+      // consumed for other subscribers, but cursor de-duplication prevents two rows.
+      appendEventFrame(result.frame, pausedRef.current, setFrames);
+    } catch (cause) { setError(String(cause)); }
   };
   const clearFrames = () => { setFrames([]); setWaveSamples([]); };
   const clearWaveform = () => {
@@ -245,7 +250,7 @@ function handleSerialEvent(event: SerialEvent, pausedRef: MutableRefObject<boole
 
 function appendEventFrame(frame: SerialFrame, isPaused: boolean, setFrames: StateSetter<SerialFrame[]>) {
   if (isPaused) return;
-  setFrames((items) => [...items, frame].slice(-300));
+  setFrames((items) => items.some((item) => item.cursor === frame.cursor) ? items : [...items, frame].slice(-300));
 }
 
 function appendWaveFrame(frame: SerialFrame, isPaused: boolean, channels: WaveChannel[], setWaveSamples: StateSetter<WaveSample[]>) {
