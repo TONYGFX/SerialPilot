@@ -166,8 +166,12 @@ tests/               自动化测试（按模块放置在 src/ 与 Rust 模块�
 - 本地会话审计目前主要保留在内存中，SQLite 持久化将在后续版本完善。
 - Mock 适配器仅用于开发和自动化测试，不进入正常发行版运行路径。
 
-## 许可证
+## 友链
 
-本项目采用 [MIT License](LICENSE) 开源。
+**LinuxDo** — [https://linux.do](https://linux.do/)
+
+## License
+
+本项目采用 [MIT License](LICENSE) 协议开源。
 
 Copyright (c) 2026 TONYGFX
