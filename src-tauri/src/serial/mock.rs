@@ -82,7 +82,8 @@ impl SerialAdapter for MockSerialAdapter {
                 }
                 if is_ymodem_header && !ymodem_header_seen {
                     ymodem_header_seen = true;
-                    tokio::time::sleep(Duration::from_millis(2)).await;
+                    // A receiver may issue the post-header CRC request immediately.
+                    // Keeping it adjacent to ACK exercises the core cursor hand-off.
                     if response_tx.send(vec![0x43]).await.is_err() {
                         break;
                     }

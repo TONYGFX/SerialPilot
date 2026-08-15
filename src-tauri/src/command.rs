@@ -1436,7 +1436,7 @@ async fn stream_file(
                 timeout_ms,
             )
             .await?;
-            if wait_for_control(
+            let header_ack = wait_for_control(
                 state,
                 changed,
                 cancel,
@@ -1445,18 +1445,16 @@ async fn stream_file(
                 timeout_ms,
                 &[0x06],
             )
-            .await
-            .is_none()
-            {
+            .await;
+            let Some((header_ack_cursor, _)) = header_ack else {
                 return Err((0, cancellation_requested(cancel, action_id).await));
-            }
-            let after_header = state.lock().await.next_cursor.saturating_sub(1);
+            };
             if wait_for_control(
                 state,
                 changed,
                 cancel,
                 action_id,
-                after_header,
+                header_ack_cursor,
                 timeout_ms,
                 &[0x43],
             )
@@ -1612,13 +1610,17 @@ async fn wait_for_control(
     after_cursor: u64,
     timeout_ms: u64,
     accepted: &[u8],
-) -> Option<u8> {
+) -> Option<(u64, u8)> {
     let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
     let mut cursor = after_cursor;
     loop {
         if cancellation_requested(cancel, action_id).await {
             return None;
         }
+        // Subscribe before scanning so a frame arriving between the scan and wait
+        // cannot lose its notification and force an unnecessary protocol timeout.
+        let notified = changed.notified();
+        tokio::pin!(notified);
         let snapshot = state.lock().await;
         let frames: Vec<_> = snapshot
             .frames
@@ -1630,7 +1632,7 @@ async fn wait_for_control(
         for frame in frames {
             if let Ok(bytes) = BASE64.decode(&frame.raw_base64) {
                 if bytes.len() == 1 && accepted.contains(&bytes[0]) {
-                    return Some(bytes[0]);
+                    return Some((frame.cursor, bytes[0]));
                 }
             }
             cursor = frame.cursor;
@@ -1639,7 +1641,7 @@ async fn wait_for_control(
         if remaining.is_zero() {
             return None;
         }
-        if timeout(remaining, changed.notified()).await.is_err() {
+        if timeout(remaining, &mut notified).await.is_err() {
             return None;
         }
     }
