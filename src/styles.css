@@ -314,7 +314,7 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .file-cancel:hover { border-color: #b6534d; background: #3a2321; color: #fff; }
 .file-dismiss { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 21px; padding: 0 7px; border: 1px solid #40535a; border-radius: 2px; background: #202b30; color: #b4c4c7; font-size: 9px; }
 .file-dismiss:hover { border-color: #668087; background: #2a383e; color: #fff; }
-.file-dismiss-hint { color: #718189; font-size: 9px; text-align: right; }
+.file-dismiss-countdown { display: inline-grid; width: 13px; height: 13px; place-items: center; border-radius: 50%; background: #455b63; color: #eef5f6; font: 8px var(--serial-mono-font); }
 .file-picker-error { overflow: hidden; color: #d9958d; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .send { justify-self: end; width: 82px; min-height: 29px; margin: 7px 14px 9px; padding: 0 12px; font-size: 10px; }
 
@@ -538,7 +538,7 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .app-shell[data-theme="light"] .file-cancel:hover { border-color: #b6534d; background: #fbe0dc; color: #842d27; }
 .app-shell[data-theme="light"] .file-dismiss { border-color: #bdcbcf; background: #f6f9fa; color: #526b72; }
 .app-shell[data-theme="light"] .file-dismiss:hover { border-color: #91a8ae; background: #edf3f4; color: #314d55; }
-.app-shell[data-theme="light"] .file-dismiss-hint { color: #6c8187; }
+.app-shell[data-theme="light"] .file-dismiss-countdown { background: #718990; color: #fff; }
 .app-shell[data-theme="light"] .receive-display-picker { border-color: #bdcbcf; }
 .app-shell[data-theme="light"] .receive-display-picker button { border-color: #bdcbcf; background: #f2f6f7; color: #536a71; }
 .app-shell[data-theme="light"] .receive-display-picker button:hover, .app-shell[data-theme="light"] .receive-display-picker button.selected { background: #e7f5eb; color: #1e7044; }

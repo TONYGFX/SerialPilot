@@ -126,7 +126,7 @@ export function useSerialSession(textCharset: TextCharset): SerialSession {
     const actionId = fileProgress.action_id;
     const dismissTimer = window.setTimeout(() => {
       setFileProgress((current) => current?.action_id === actionId ? undefined : current);
-    }, 3_000);
+    }, 5_000);
     return () => window.clearTimeout(dismissTimer);
   }, [fileProgress]);
 
