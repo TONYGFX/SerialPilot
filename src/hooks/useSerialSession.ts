@@ -81,6 +81,7 @@ export type SerialSession = {
   setAutoReconnect: (enabled: boolean) => void;
   sendFile: (filePath: string, chunkSize: number, intervalMs: number) => Promise<void>;
   cancelFileSend: () => Promise<void>;
+  dismissFileSend: () => void;
 };
 
 /**
@@ -120,6 +121,14 @@ export function useSerialSession(textCharset: TextCharset): SerialSession {
   useEffect(() => { textCharsetRef.current = textCharset; }, [textCharset]);
   useEffect(() => { channelsRef.current = waveChannels; }, [waveChannels]);
   useEffect(() => { if (status.connected) hasConnectedRef.current = true; }, [status.connected]);
+  useEffect(() => {
+    if (!fileProgress?.completed) return;
+    const actionId = fileProgress.action_id;
+    const dismissTimer = window.setTimeout(() => {
+      setFileProgress((current) => current?.action_id === actionId ? undefined : current);
+    }, 3_000);
+    return () => window.clearTimeout(dismissTimer);
+  }, [fileProgress]);
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -222,8 +231,9 @@ export function useSerialSession(textCharset: TextCharset): SerialSession {
       }
     }
   };
+  const dismissFileSend = () => setFileProgress(undefined);
 
-  return { ports, config, status, frames, waveSamples, waveChannels, fileProgress, filePath, fileProtocol, waveformPaused, payload, encoding, paused, autoReconnect, timedSend, timerSeconds, error, setConfig, setPayload, setEncoding, setFilePath, setFileProtocol, setTimedSend, setTimerSeconds, setWaveChannels, refreshPorts, open, close, send, sendFile, cancelFileSend, clearFrames, clearWaveform, saveFrames, togglePaused, toggleWaveformPaused, setAutoReconnect };
+  return { ports, config, status, frames, waveSamples, waveChannels, fileProgress, filePath, fileProtocol, waveformPaused, payload, encoding, paused, autoReconnect, timedSend, timerSeconds, error, setConfig, setPayload, setEncoding, setFilePath, setFileProtocol, setTimedSend, setTimerSeconds, setWaveChannels, refreshPorts, open, close, send, sendFile, cancelFileSend, dismissFileSend, clearFrames, clearWaveform, saveFrames, togglePaused, toggleWaveformPaused, setAutoReconnect };
 }
 
 function useSerialEvents(handlers: SerialEventHandlers) {

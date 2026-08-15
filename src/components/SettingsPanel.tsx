@@ -29,6 +29,7 @@ type SettingsPanelProps = {
   onFilePath: (filePath: string) => void;
   onFileProtocol: (protocol: FileTransferProtocol) => void;
   onCancelFileSend: () => Promise<void>;
+  onDismissFileSend: () => void;
 };
 
 const BAUD_RATES = [300, 600, 1200, 2400, 4800, 9600, 14400, 19200, 38400, 56000, 57600, 115200, 128000, 230400, 256000, 460800, 512000, 750000, 921600, 1000000, 1500000, 2000000];
@@ -42,7 +43,7 @@ const PARITY_OPTIONS: SelectOption[] = [{ value: "none", label: "无" }, { value
  * @param props Connection state and callbacks supplied by the serial-session hook.
  * @returns The serial settings sidebar.
  */
-export function SettingsPanel({ config, ports, connected, autoReconnect, timedSend, timerSeconds, fileProtocol, fileProgress, onChange, onOpen, onClose, onRefreshPorts, onAutoReconnect, onTimedSend, onTimerSeconds, onFilePath, onFileProtocol, onCancelFileSend }: SettingsPanelProps) {
+export function SettingsPanel({ config, ports, connected, autoReconnect, timedSend, timerSeconds, fileProtocol, fileProgress, onChange, onOpen, onClose, onRefreshPorts, onAutoReconnect, onTimedSend, onTimerSeconds, onFilePath, onFileProtocol, onCancelFileSend, onDismissFileSend }: SettingsPanelProps) {
   return <aside className="settings" aria-label="串口配置">
     <div className="settings-title"><h2>串口配置</h2><button type="button" className="tool-button" title="刷新串口列表" aria-label="刷新串口列表" onClick={onRefreshPorts}><Icon name="refresh" /></button></div>
     <label>端口<OptionPicker value={config.port} disabled={connected} options={ports.map((port) => ({ value: port.id, label: port.display_name }))} onChange={(port) => onChange({ ...config, port })} /></label>
@@ -53,11 +54,11 @@ export function SettingsPanel({ config, ports, connected, autoReconnect, timedSe
     <div className="settings-divider" />
     <h2>发送控制</h2><div className="timed-send-control"><label className="check"><input type="checkbox" checked={timedSend} onChange={(event) => onTimedSend(event.target.checked)} />定时发送</label><div className="timed-send-interval"><div className="unit-stepper"><NumberStepper value={timerSeconds} min={0.1} max={3600} step={0.1} ariaLabel="定时发送间隔秒数" onChange={onTimerSeconds} /><span>秒</span></div></div></div>
     <div className="settings-divider" />
-    <FileTransferSettings fileProtocol={fileProtocol} fileProgress={fileProgress} onFilePath={onFilePath} onFileProtocol={onFileProtocol} onCancelFileSend={onCancelFileSend} />
+    <FileTransferSettings fileProtocol={fileProtocol} fileProgress={fileProgress} onFilePath={onFilePath} onFileProtocol={onFileProtocol} onCancelFileSend={onCancelFileSend} onDismissFileSend={onDismissFileSend} />
   </aside>;
 }
 
-function FileTransferSettings({ fileProtocol, fileProgress, onFilePath, onFileProtocol, onCancelFileSend }: Pick<SettingsPanelProps, "fileProtocol" | "fileProgress" | "onFilePath" | "onFileProtocol" | "onCancelFileSend">) {
+function FileTransferSettings({ fileProtocol, fileProgress, onFilePath, onFileProtocol, onCancelFileSend, onDismissFileSend }: Pick<SettingsPanelProps, "fileProtocol" | "fileProgress" | "onFilePath" | "onFileProtocol" | "onCancelFileSend" | "onDismissFileSend">) {
   const [error, setError] = useState("");
   const chooseFile = async () => {
     setError("");
@@ -68,13 +69,14 @@ function FileTransferSettings({ fileProtocol, fileProgress, onFilePath, onFilePr
       setError(String(cause));
     }
   };
-  return <section className="file-settings"><h2>文件发送</h2><label className="file-protocol">协议<OptionPicker value={fileProtocol} options={[{ value: "null", label: "Null" }, { value: "xmodem", label: "Xmodem" }, { value: "xmodem-1k", label: "Xmodem-1k" }, { value: "ymodem", label: "Ymodem" }]} onChange={(value) => onFileProtocol(value as FileTransferProtocol)} /></label><button type="button" className="secondary file-picker" onClick={() => void chooseFile()}><Icon name="file" size={14} />选择文件</button>{fileProgress && <FileTransferProgress progress={fileProgress} onCancel={onCancelFileSend} />}{error && <small className="file-picker-error" role="alert">{error}</small>}</section>;
+  return <section className="file-settings"><h2>文件发送</h2><label className="file-protocol">协议<OptionPicker value={fileProtocol} options={[{ value: "null", label: "Null" }, { value: "xmodem", label: "Xmodem" }, { value: "xmodem-1k", label: "Xmodem-1k" }, { value: "ymodem", label: "Ymodem" }]} onChange={(value) => onFileProtocol(value as FileTransferProtocol)} /></label><button type="button" className="secondary file-picker" onClick={() => void chooseFile()}><Icon name="file" size={14} />选择文件</button>{fileProgress && <FileTransferProgress progress={fileProgress} onCancel={onCancelFileSend} onDismiss={onDismissFileSend} />}{error && <small className="file-picker-error" role="alert">{error}</small>}</section>;
 }
 
-function FileTransferProgress({ progress, onCancel }: { progress: FileSendProgress; onCancel: () => Promise<void> }) {
+function FileTransferProgress({ progress, onCancel, onDismiss }: { progress: FileSendProgress; onCancel: () => Promise<void>; onDismiss: () => void }) {
   const percent = progress.file_size === 0 ? 100 : Math.min(100, Math.round((progress.sent_bytes / progress.file_size) * 100));
   const state = progress.cancelled ? "已取消" : progress.completed ? "传输完成" : "正在发送";
-  return <div className="file-progress" aria-live="polite"><div className="file-progress-head"><span>{state}</span><strong>{percent}%</strong></div><div className="file-progress-bar" role="progressbar" aria-label="文件发送进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}><span style={{ width: `${percent}%` }} /></div><div className="file-progress-line"><small>{formatTransferBytes(progress.sent_bytes)} / {formatTransferBytes(progress.file_size)}</small>{!progress.completed && !progress.cancelled && <button type="button" className="file-cancel" onClick={() => void onCancel()}>取消</button>}</div></div>;
+  const finished = progress.completed || progress.cancelled;
+  return <div className="file-progress" aria-live="polite"><div className="file-progress-head"><span>{state}</span><strong>{percent}%</strong></div><div className="file-progress-bar" role="progressbar" aria-label="文件发送进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}><span style={{ width: `${percent}%` }} /></div><div className="file-progress-line"><small>{formatTransferBytes(progress.sent_bytes)} / {formatTransferBytes(progress.file_size)}</small>{finished ? <button type="button" className="file-dismiss" onClick={onDismiss} title="关闭文件发送状态"><Icon name="close" size={12} />关闭</button> : <button type="button" className="file-cancel" onClick={() => void onCancel()}>取消</button>}</div>{progress.completed && <small className="file-dismiss-hint">3 秒后自动关闭</small>}</div>;
 }
 
 function formatTransferBytes(bytes: number): string {
