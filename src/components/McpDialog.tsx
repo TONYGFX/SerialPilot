@@ -6,7 +6,7 @@
 
 import { useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { McpHttpPreferences, McpHttpStatus, TextCharset, Theme } from "../types/settings";
+import type { McpHttpPreferences, McpHttpStatus, SendShortcut, TextCharset, Theme } from "../types/settings";
 import { NumberStepper, OptionPicker, type SelectOption } from "./FormControls";
 import { Icon } from "./Icon";
 
@@ -17,8 +17,10 @@ type McpDialogProps = {
   initialPage: SettingsPage;
   theme: Theme;
   textCharset: TextCharset;
+  sendShortcut: SendShortcut;
   onThemeChange: (theme: Theme) => void;
   onTextCharsetChange: (charset: TextCharset) => void;
+  onSendShortcutChange: (shortcut: SendShortcut) => void;
   preferences: McpHttpPreferences;
   runtimeStatus: McpHttpStatus;
   onChange: (preferences: McpHttpPreferences) => void;
@@ -33,8 +35,13 @@ const TEXT_CHARSETS: SelectOption[] = [
   { value: "utf-16le", label: "UTF-16LE" },
 ];
 
+const SEND_SHORTCUTS: SelectOption[] = [
+  { value: "ctrl-enter", label: "Ctrl + Enter（默认）" },
+  { value: "enter", label: "Enter" },
+];
+
 /** Renders application settings, including MCP transport controls. */
-export function McpDialog({ initialPage, theme, textCharset, onThemeChange, onTextCharsetChange, preferences, runtimeStatus, onChange, onApply, onClose }: McpDialogProps) {
+export function McpDialog({ initialPage, theme, textCharset, sendShortcut, onThemeChange, onTextCharsetChange, onSendShortcutChange, preferences, runtimeStatus, onChange, onApply, onClose }: McpDialogProps) {
   const [activePage, setActivePage] = useState<SettingsPage>(initialPage);
   const [error, setError] = useState<string>();
   const [isApplying, setIsApplying] = useState(false);
@@ -89,7 +96,7 @@ export function McpDialog({ initialPage, theme, textCharset, onThemeChange, onTe
           <button type="button" className={activePage === "about" ? "selected" : ""} aria-current={activePage === "about" ? "page" : undefined} onClick={() => setActivePage("about")}><Icon name="info" size={14} />关于</button>
         </nav>
         <div className="settings-page">
-          {activePage === "general" && <section className="settings-group"><div className="settings-section-title"><h2>外观</h2><p>选择工作区的显示主题；跟随系统会在操作系统切换外观时自动更新。</p></div><div className="settings-theme-options" role="group" aria-label="界面主题"><button type="button" className={theme === "system" ? "selected" : ""} aria-pressed={theme === "system"} onClick={() => onThemeChange("system")}>跟随系统</button><button type="button" className={theme === "dark" ? "selected" : ""} aria-pressed={theme === "dark"} onClick={() => onThemeChange("dark")}>深色</button><button type="button" className={theme === "light" ? "selected" : ""} aria-pressed={theme === "light"} onClick={() => onThemeChange("light")}>浅色</button></div><div className="settings-section-title text-charset-title"><h2>文本编码</h2><p>用于终端文本收发、文本匹配和波形解析；HEX 始终显示原始字节。</p></div><label className="text-charset-picker">编码<OptionPicker value={textCharset} options={TEXT_CHARSETS} onChange={(value) => onTextCharsetChange(value as TextCharset)} /></label></section>}
+          {activePage === "general" && <section className="settings-group"><div className="settings-section-title"><h2>外观</h2><p>选择工作区的显示主题；跟随系统会在操作系统切换外观时自动更新。</p></div><div className="settings-theme-options" role="group" aria-label="界面主题"><button type="button" className={theme === "system" ? "selected" : ""} aria-pressed={theme === "system"} onClick={() => onThemeChange("system")}>跟随系统</button><button type="button" className={theme === "dark" ? "selected" : ""} aria-pressed={theme === "dark"} onClick={() => onThemeChange("dark")}>深色</button><button type="button" className={theme === "light" ? "selected" : ""} aria-pressed={theme === "light"} onClick={() => onThemeChange("light")}>浅色</button></div><div className="settings-section-title text-charset-title"><h2>文本编码</h2><p>用于终端文本收发、文本匹配和波形解析；HEX 始终显示原始字节。</p></div><label className="text-charset-picker">编码<OptionPicker value={textCharset} options={TEXT_CHARSETS} onChange={(value) => onTextCharsetChange(value as TextCharset)} /></label><div className="settings-section-title keyboard-settings-title"><h2>快捷键</h2><p>发送快捷键仅在终端输入框中生效；选择 Enter 后，Shift + Enter 可继续输入换行。</p></div><label className="text-charset-picker">发送<OptionPicker value={sendShortcut} options={SEND_SHORTCUTS} onChange={(value) => onSendShortcutChange(value as SendShortcut)} /></label><dl className="shortcut-list"><div><dt>Ctrl + S</dt><dd>保存终端日志</dd></div><div><dt>Ctrl + L</dt><dd>清空终端日志</dd></div></dl></section>}
           {activePage === "mcp" && <section className="settings-group"><div className="settings-section-title"><h2>HTTP 服务</h2><p>与桌面工作区共用同一个串口核心、会话和接收缓冲区。</p></div>
             <label className="check"><input type="checkbox" checked={preferences.enabled} onChange={(event) => update({ enabled: event.target.checked })} />启用本机 HTTP MCP</label>
             <label>监听地址<input value="127.0.0.1" readOnly aria-label="HTTP MCP 监听地址" /></label>

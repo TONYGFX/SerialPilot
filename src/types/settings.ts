@@ -9,6 +9,13 @@ export type Theme = "dark" | "light" | "system";
 /** Text charset used when the terminal is in text rather than HEX mode. */
 export type TextCharset = "utf-8" | "gbk" | "ascii" | "utf-16le";
 
+/** Configurable keyboard gesture used to submit terminal text and HEX payloads. */
+export type SendShortcut = "ctrl-enter" | "enter";
+
+export type KeyboardPreferences = {
+  sendShortcut: SendShortcut;
+};
+
 export type McpHttpPreferences = {
   enabled: boolean;
   port: number;
@@ -22,11 +29,13 @@ export type McpHttpStatus = {
 export type ApplicationPreferences = {
   theme: Theme;
   textCharset: TextCharset;
+  keyboard: KeyboardPreferences;
   mcpHttp: McpHttpPreferences;
 };
 
 export const DEFAULT_APPLICATION_PREFERENCES: ApplicationPreferences = {
   theme: "system",
   textCharset: "utf-8",
+  keyboard: { sendShortcut: "ctrl-enter" },
   mcpHttp: { enabled: false, port: 3030 },
 };

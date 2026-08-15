@@ -343,8 +343,13 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .settings-section-title { margin-bottom: 18px; }
 .settings-section-title h2 { margin-bottom: 6px; font-size: 13px; }
 .settings-section-title p, .settings-note { margin: 0; color: #718189; font-size: 10px; line-height: 1.55; }
-.text-charset-title { margin: 12px 0 0; padding-top: 16px; border-top: 1px solid #2b373c; }
+.text-charset-title, .keyboard-settings-title { margin: 12px 0 0; padding-top: 16px; border-top: 1px solid #2b373c; }
 .text-charset-picker { width: min(220px, 100%); margin: 0; }
+.shortcut-list { display: grid; width: min(300px, 100%); margin: 2px 0 0; border: 1px solid #35434a; background: #141d21; }
+.shortcut-list div { display: grid; grid-template-columns: 84px minmax(0, 1fr); min-height: 30px; align-items: center; padding: 0 9px; border-bottom: 1px solid #2b373c; }
+.shortcut-list div:last-child { border-bottom: 0; }
+.shortcut-list dt { color: #cae0d1; font: 10px var(--serial-mono-font); }
+.shortcut-list dd { margin: 0; color: #91a1a7; font-size: 10px; }
 .mcp-dialog-content .check, .mcp-dialog-content label { margin: 0; }
 .mcp-dialog-content .check { font-size: 11px; }
 .settings-apply { width: auto; min-width: 112px; justify-self: start; padding: 0 12px; }
@@ -569,7 +574,11 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .app-shell[data-theme="light"] .mcp-dialog { border-color: #c4d0d3; background: #f8fafb; box-shadow: 0 18px 48px rgb(36 56 63 / 24%); }
 .app-shell[data-theme="light"] .app-settings-header { border-color: #d7e0e2; background: #fff; }
 .app-shell[data-theme="light"] .settings-section-title p, .app-shell[data-theme="light"] .settings-note { color: #687f86; }
-.app-shell[data-theme="light"] .text-charset-title { border-color: #d7e0e2; }
+.app-shell[data-theme="light"] .text-charset-title, .app-shell[data-theme="light"] .keyboard-settings-title { border-color: #d7e0e2; }
+.app-shell[data-theme="light"] .shortcut-list { border-color: #c8d4d7; background: #fff; }
+.app-shell[data-theme="light"] .shortcut-list div { border-color: #d7e0e2; }
+.app-shell[data-theme="light"] .shortcut-list dt { color: #287149; }
+.app-shell[data-theme="light"] .shortcut-list dd { color: #60757c; }
 .app-shell[data-theme="light"] .mcp-endpoint { border-color: #a6d1b4; background: #f1faf3; color: #27854d; }
 .app-shell[data-theme="light"] .mcp-endpoint span, .app-shell[data-theme="light"] .mcp-copy { color: #3c7750; }
 .app-shell[data-theme="light"] .mcp-copy { border-color: #a6d1b4; }

@@ -19,4 +19,12 @@ describe("terminal HEX input formatter", () => {
   it("keeps printable serial text in text mode", () => {
     expect(terminalFormatters.formatFrameText("OK\n", "4F 4B 0A")).toBe("OK");
   });
+
+  it("uses the configured shortcut without consuming text newlines", () => {
+    const key = (keyName: string, options: Partial<KeyboardEvent> = {}) => ({ key: keyName, altKey: false, shiftKey: false, ctrlKey: false, metaKey: false, ...options }) as never;
+    expect(terminalFormatters.shouldSubmitFromShortcut(key("Enter", { ctrlKey: true }), "ctrl-enter")).toBe(true);
+    expect(terminalFormatters.shouldSubmitFromShortcut(key("Enter"), "ctrl-enter")).toBe(false);
+    expect(terminalFormatters.shouldSubmitFromShortcut(key("Enter"), "enter")).toBe(true);
+    expect(terminalFormatters.shouldSubmitFromShortcut(key("Enter", { shiftKey: true }), "enter")).toBe(false);
+  });
 });

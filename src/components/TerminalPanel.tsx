@@ -3,18 +3,19 @@
  * It renders frames emitted by the serial core and delegates all commands to its caller.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent, type UIEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type UIEvent } from "react";
 import { Icon } from "./Icon";
 import { ResizableDivider } from "./ResizableDivider";
 import { decodeSerialText } from "../lib/textEncoding";
 import type { DisplayFrame, SerialStatus } from "../types/serial";
-import type { TextCharset } from "../types/settings";
+import type { SendShortcut, TextCharset } from "../types/settings";
 
 type TerminalPanelProps = {
   activity: DisplayFrame[];
   status: SerialStatus;
   paused: boolean;
   textCharset: TextCharset;
+  sendShortcut: SendShortcut;
   encoding: "text" | "hex";
   payload: string;
   canSend: boolean;
@@ -35,17 +36,34 @@ type ReceiveDisplayMode = "text" | "hex";
  * @param props Frame history, status metrics and command callbacks.
  * @returns The terminal workspace panel.
  */
-export function TerminalPanel({ activity, status, paused, textCharset, encoding, payload, canSend, onPause, onClear, onSave, onEncoding, onPayload, onSend }: TerminalPanelProps) {
+export function TerminalPanel({ activity, status, paused, textCharset, sendShortcut, encoding, payload, canSend, onPause, onClear, onSave, onEncoding, onPayload, onSend }: TerminalPanelProps) {
   const [composerHeight, setComposerHeight] = useState(190);
   const [directionFilter, setDirectionFilter] = useState<DirectionFilter>({ rx: true, tx: true });
   const [receiveDisplayMode, setReceiveDisplayMode] = useState<ReceiveDisplayMode>("text");
   const consoleStyle = { "--composer-height": composerHeight + "px" } as CSSProperties;
+
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      if ((!event.ctrlKey && !event.metaKey) || event.altKey || event.shiftKey || isEditableTarget(event.target)) return;
+      if (event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        onSave();
+      }
+      if (event.key.toLowerCase() === "l") {
+        event.preventDefault();
+        onClear();
+      }
+    };
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, [onClear, onSave]);
+
   return <section className="console" style={consoleStyle}>
     <div className="metrics"><Metric label="会话缓冲" value={`${formatBytes(status.buffered_bytes)} / ${formatBytes(status.buffer_limit_bytes)}`} /><Metric label="丢弃帧" value={String(status.dropped_frames)} /><Metric label="总 RX" value={`${status.rx_bytes} B`} /><Metric label="总 TX" value={`${status.tx_bytes} B`} /></div>
     <div className="log-head"><h2>实时 TX / RX</h2><div className="log-actions"><DirectionFilterPicker value={directionFilter} onChange={setDirectionFilter} /><DisplayModePicker value={receiveDisplayMode} onChange={setReceiveDisplayMode} /><button type="button" className="icon-button" title={paused ? "继续接收显示" : "暂停接收显示"} aria-label={paused ? "继续接收显示" : "暂停接收显示"} onClick={onPause}><Icon name={paused ? "play" : "pause"} /></button><button type="button" className="icon-button" title="保存接收数据" aria-label="保存接收数据" onClick={onSave}><Icon name="download" /></button><button type="button" className="icon-button" title="清空接收数据" aria-label="清空接收数据" onClick={onClear}><Icon name="trash" /></button></div></div>
     <FrameLog activity={activity} directionFilter={directionFilter} displayMode={receiveDisplayMode} textCharset={textCharset} />
     <ResizableDivider orientation="horizontal" value={composerHeight} min={150} max={360} onChange={setComposerHeight} label="调整发送区高度" />
-    <SendComposer encoding={encoding} payload={payload} canSend={canSend} onEncoding={onEncoding} onPayload={onPayload} onSend={onSend} />
+    <SendComposer encoding={encoding} payload={payload} canSend={canSend} sendShortcut={sendShortcut} onEncoding={onEncoding} onPayload={onPayload} onSend={onSend} />
   </section>;
 }
 
@@ -114,7 +132,7 @@ function formatHexBytes(rawHex: string): string {
   return normalized.match(/.{1,2}/g)?.join(" ") ?? "";
 }
 
-function SendComposer({ encoding, payload, canSend, onEncoding, onPayload, onSend }: Pick<TerminalPanelProps, "encoding" | "payload" | "canSend" | "onEncoding" | "onPayload" | "onSend">) {
+function SendComposer({ encoding, payload, canSend, sendShortcut, onEncoding, onPayload, onSend }: Pick<TerminalPanelProps, "encoding" | "payload" | "canSend" | "sendShortcut" | "onEncoding" | "onPayload" | "onSend">) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const changeEncoding = (next: "text" | "hex") => {
     onEncoding(next);
@@ -138,7 +156,23 @@ function SendComposer({ encoding, payload, canSend, onEncoding, onPayload, onSen
     });
   };
 
-  return <form className="composer" onSubmit={onSend}><div className="composer-head"><h2>发送</h2><div className="segmented"><button type="button" className={encoding === "text" ? "selected" : ""} onClick={() => changeEncoding("text")}>文本</button><button type="button" className={encoding === "hex" ? "selected" : ""} onClick={() => changeEncoding("hex")}>HEX</button></div></div><textarea ref={textareaRef} value={payload} onChange={changePayload} spellCheck={false} placeholder={encoding === "hex" ? "AA 55 01" : "输入文本"} /><button className="primary send" disabled={!canSend} type="submit">发送</button></form>;
+  const submitFromShortcut = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (!canSend || event.nativeEvent.isComposing || !shouldSubmitFromShortcut(event, sendShortcut)) return;
+    event.preventDefault();
+    event.currentTarget.form?.requestSubmit();
+  };
+
+  return <form className="composer" onSubmit={onSend}><div className="composer-head"><h2>发送</h2><div className="segmented"><button type="button" className={encoding === "text" ? "selected" : ""} onClick={() => changeEncoding("text")}>文本</button><button type="button" className={encoding === "hex" ? "selected" : ""} onClick={() => changeEncoding("hex")}>HEX</button></div></div><textarea ref={textareaRef} value={payload} onChange={changePayload} onKeyDown={submitFromShortcut} spellCheck={false} placeholder={encoding === "hex" ? "AA 55 01" : "输入文本"} /><button className="primary send" disabled={!canSend} type="submit">发送</button></form>;
+}
+
+function shouldSubmitFromShortcut(event: ReactKeyboardEvent<HTMLTextAreaElement>, shortcut: SendShortcut): boolean {
+  if (event.key !== "Enter" || event.altKey || event.shiftKey) return false;
+  if (shortcut === "enter") return !event.ctrlKey && !event.metaKey;
+  return event.ctrlKey || event.metaKey;
+}
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  return target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement || target instanceof HTMLElement && target.isContentEditable;
 }
 
 function formatHexInput(value: string): string {
@@ -167,4 +201,4 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024).toFixed(1)} KB`;
 }
 
-export const terminalFormatters = { formatHexBytes, formatHexInput, formatFrameText, positionAfterHexCount, filterFramesByDirection };
+export const terminalFormatters = { formatHexBytes, formatHexInput, formatFrameText, positionAfterHexCount, filterFramesByDirection, shouldSubmitFromShortcut };
