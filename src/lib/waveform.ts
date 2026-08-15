@@ -51,9 +51,9 @@ const FOOTER_SAFE_HEIGHT = 64;
  * @param channels User-defined names and display rules.
  * @returns Samples for enabled channels with matching numeric values.
  */
-export function parseConfiguredFrame(frame: SerialFrame, channels: WaveChannel[]): WaveSample[] {
-  if (frame.direction !== "rx" || !frame.text_utf8 || !frame.text_utf8.endsWith("\r\n")) return [];
-  const values = parseNamedValues(frame.text_utf8);
+export function parseConfiguredFrame(frame: SerialFrame, channels: WaveChannel[], decodedText = frame.text_utf8): WaveSample[] {
+  if (frame.direction !== "rx" || !decodedText || !decodedText.endsWith("\r\n")) return [];
+  const values = parseNamedValues(decodedText);
   if (!values) return [];
   return channels.flatMap((channel) => {
     if (!channel.enabled) return [];

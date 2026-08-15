@@ -17,8 +17,10 @@ import {
   type SetStateAction,
 } from "react";
 import { parseConfiguredFrame } from "../lib/waveform";
+import { decodeSerialText } from "../lib/textEncoding";
 import { executeSerialCommand, saveTextFile } from "../services/serialClient";
 import type { FileSendProgress, FileTransferProtocol, SerialConfig, SerialEvent, SerialFrame, SerialPort, SerialStatus } from "../types/serial";
+import type { TextCharset } from "../types/settings";
 import type { WaveChannel, WaveSample } from "../types/waveform";
 
 const DEFAULT_CONFIG: SerialConfig = { port: "", baud_rate: 115200, data_bits: 8, parity: "none", stop_bits: 1, flow_control: "none", exclusive: true, dtr: false, rts: false };
@@ -29,6 +31,7 @@ type StateSetter<Value> = Dispatch<SetStateAction<Value>>;
 type SerialEventHandlers = {
   pausedRef: MutableRefObject<boolean>;
   waveformPausedRef: MutableRefObject<boolean>;
+  textCharsetRef: MutableRefObject<TextCharset>;
   channelsRef: MutableRefObject<WaveChannel[]>;
   setFrames: StateSetter<SerialFrame[]>;
   setWaveSamples: StateSetter<WaveSample[]>;
@@ -85,7 +88,7 @@ export type SerialSession = {
  *
  * @returns Current serial-session state plus UI-safe command actions.
  */
-export function useSerialSession(): SerialSession {
+export function useSerialSession(textCharset: TextCharset): SerialSession {
   const [ports, setPorts] = useState<SerialPort[]>([]);
   const [config, setConfig] = useState<SerialConfig>(DEFAULT_CONFIG);
   const [status, setStatus] = useState<SerialStatus>(EMPTY_STATUS);
@@ -105,6 +108,7 @@ export function useSerialSession(): SerialSession {
   const [error, setError] = useState<string>();
   const pausedRef = useRef(false);
   const waveformPausedRef = useRef(true);
+  const textCharsetRef = useRef<TextCharset>(textCharset);
   const channelsRef = useRef<WaveChannel[]>([]);
   const cancelledFileActionRef = useRef<string>();
   const manuallyClosedRef = useRef(false);
@@ -113,6 +117,7 @@ export function useSerialSession(): SerialSession {
 
   useEffect(() => { pausedRef.current = paused; }, [paused]);
   useEffect(() => { waveformPausedRef.current = waveformPaused; }, [waveformPaused]);
+  useEffect(() => { textCharsetRef.current = textCharset; }, [textCharset]);
   useEffect(() => { channelsRef.current = waveChannels; }, [waveChannels]);
   useEffect(() => { if (status.connected) hasConnectedRef.current = true; }, [status.connected]);
 
@@ -135,13 +140,13 @@ export function useSerialSession(): SerialSession {
     }
   }, []);
 
-  useSerialEvents({ pausedRef, waveformPausedRef, channelsRef, cancelledFileActionRef, setFrames, setWaveSamples, setWaveChannels: setWaveChannelsState, setFileProgress, refreshPorts, refreshStatus, setError });
+  useSerialEvents({ pausedRef, waveformPausedRef, textCharsetRef, channelsRef, cancelledFileActionRef, setFrames, setWaveSamples, setWaveChannels: setWaveChannelsState, setFileProgress, refreshPorts, refreshStatus, setError });
   useEffect(() => {
     void executeSerialCommand<{ type: "waveform_channels"; channels: WaveChannel[] }>({ type: "waveform_list_channels" })
       .then((result) => setWaveChannelsState(result.channels))
       .catch((cause) => setError(String(cause)));
   }, []);
-  useTimedSend(timedSend, status.connected, sessionId, timerSeconds, encoding, payload, setError);
+  useTimedSend(timedSend, status.connected, sessionId, timerSeconds, encoding, textCharset, payload, setError);
   useAutoReconnect(autoReconnect, status.connected, manuallyClosedRef, hasConnectedRef, config);
 
   const open = async () => {
@@ -163,7 +168,7 @@ export function useSerialSession(): SerialSession {
       return;
     }
     try {
-      const result = await executeSerialCommand<{ type: "sent"; action_id: string; frame: SerialFrame }>({ type: "send", session_id: sessionId, encoding, payload, timeout_ms: 1000 });
+      const result = await executeSerialCommand<{ type: "sent"; action_id: string; frame: SerialFrame }>({ type: "send", session_id: sessionId, encoding, text_charset: textCharset, payload, timeout_ms: 1000 });
       // The command result is authoritative for the local TX row. The event is still
       // consumed for other subscribers, but cursor de-duplication prevents two rows.
       appendEventFrame(result.frame, pausedRef.current, setFrames);
@@ -174,7 +179,7 @@ export function useSerialSession(): SerialSession {
     setWaveSamples([]);
     void executeSerialCommand({ type: "waveform_clear_samples" }).catch((cause) => setError(String(cause)));
   };
-  const saveFrames = () => { void saveFrameLog(frames).catch((cause) => setError(String(cause))); };
+  const saveFrames = () => { void saveFrameLog(frames, textCharset).catch((cause) => setError(String(cause))); };
   const togglePaused = () => setPaused((current) => !current);
   const toggleWaveformPaused = () => {
     if (waveformPausedRef.current) {
@@ -222,22 +227,22 @@ export function useSerialSession(): SerialSession {
 }
 
 function useSerialEvents(handlers: SerialEventHandlers) {
-  const { pausedRef, waveformPausedRef, channelsRef, cancelledFileActionRef, setFrames, setWaveSamples, setWaveChannels, setFileProgress, refreshPorts, refreshStatus, setError } = handlers;
+  const { pausedRef, waveformPausedRef, textCharsetRef, channelsRef, cancelledFileActionRef, setFrames, setWaveSamples, setWaveChannels, setFileProgress, refreshPorts, refreshStatus, setError } = handlers;
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let isDisposed = false;
-    void subscribeToSerialEvents({ pausedRef, waveformPausedRef, channelsRef, cancelledFileActionRef, setFrames, setWaveSamples, setWaveChannels, setFileProgress, refreshPorts, refreshStatus, setError }).then((listener) => {
+    void subscribeToSerialEvents({ pausedRef, waveformPausedRef, textCharsetRef, channelsRef, cancelledFileActionRef, setFrames, setWaveSamples, setWaveChannels, setFileProgress, refreshPorts, refreshStatus, setError }).then((listener) => {
       if (isDisposed) listener();
       else unlisten = listener;
     });
     return () => { isDisposed = true; unlisten?.(); };
-  }, [cancelledFileActionRef, channelsRef, pausedRef, refreshPorts, refreshStatus, setError, setFileProgress, setFrames, setWaveChannels, setWaveSamples, waveformPausedRef]);
+  }, [cancelledFileActionRef, channelsRef, pausedRef, refreshPorts, refreshStatus, setError, setFileProgress, setFrames, setWaveChannels, setWaveSamples, textCharsetRef, waveformPausedRef]);
 }
 
 async function subscribeToSerialEvents(handlers: SerialEventHandlers): Promise<() => void> {
-  const { pausedRef, waveformPausedRef, channelsRef, cancelledFileActionRef, setFrames, setWaveSamples, setWaveChannels, setFileProgress, refreshPorts, refreshStatus, setError } = handlers;
+  const { pausedRef, waveformPausedRef, textCharsetRef, channelsRef, cancelledFileActionRef, setFrames, setWaveSamples, setWaveChannels, setFileProgress, refreshPorts, refreshStatus, setError } = handlers;
   try {
-    const unlisten = await listen<SerialEvent>("serial-event", ({ payload: event }) => handleSerialEvent(event, pausedRef, waveformPausedRef, channelsRef, cancelledFileActionRef, setFrames, setWaveSamples, setWaveChannels, setFileProgress, refreshStatus));
+    const unlisten = await listen<SerialEvent>("serial-event", ({ payload: event }) => handleSerialEvent(event, pausedRef, waveformPausedRef, textCharsetRef, channelsRef, cancelledFileActionRef, setFrames, setWaveSamples, setWaveChannels, setFileProgress, refreshStatus));
     await refreshPorts();
     await refreshStatus();
     return unlisten;
@@ -247,11 +252,11 @@ async function subscribeToSerialEvents(handlers: SerialEventHandlers): Promise<(
   }
 }
 
-function handleSerialEvent(event: SerialEvent, pausedRef: MutableRefObject<boolean>, waveformPausedRef: MutableRefObject<boolean>, channelsRef: MutableRefObject<WaveChannel[]>, cancelledFileActionRef: MutableRefObject<string | undefined>, setFrames: StateSetter<SerialFrame[]>, setWaveSamples: StateSetter<WaveSample[]>, setWaveChannels: StateSetter<WaveChannel[]>, setFileProgress: StateSetter<FileSendProgress | undefined>, refreshStatus: () => Promise<void>) {
+function handleSerialEvent(event: SerialEvent, pausedRef: MutableRefObject<boolean>, waveformPausedRef: MutableRefObject<boolean>, textCharsetRef: MutableRefObject<TextCharset>, channelsRef: MutableRefObject<WaveChannel[]>, cancelledFileActionRef: MutableRefObject<string | undefined>, setFrames: StateSetter<SerialFrame[]>, setWaveSamples: StateSetter<WaveSample[]>, setWaveChannels: StateSetter<WaveChannel[]>, setFileProgress: StateSetter<FileSendProgress | undefined>, refreshStatus: () => Promise<void>) {
   if (event.kind === "frame") {
     const frame = event.detail as SerialFrame;
     appendEventFrame(frame, pausedRef.current, setFrames);
-    appendWaveFrame(frame, waveformPausedRef.current, channelsRef.current, setWaveSamples);
+    appendWaveFrame(frame, waveformPausedRef.current, textCharsetRef.current, channelsRef.current, setWaveSamples);
   }
   if (event.kind === "file_progress") {
     const progress = event.detail as FileSendProgress;
@@ -277,19 +282,19 @@ function appendEventFrame(frame: SerialFrame, isPaused: boolean, setFrames: Stat
   setFrames((items) => items.some((item) => item.cursor === frame.cursor) ? items : [...items, frame].slice(-300));
 }
 
-function appendWaveFrame(frame: SerialFrame, isPaused: boolean, channels: WaveChannel[], setWaveSamples: StateSetter<WaveSample[]>) {
+function appendWaveFrame(frame: SerialFrame, isPaused: boolean, textCharset: TextCharset, channels: WaveChannel[], setWaveSamples: StateSetter<WaveSample[]>) {
   if (isPaused || frame.direction !== "rx") return;
-  const samples = parseConfiguredFrame(frame, channels);
+  const samples = parseConfiguredFrame(frame, channels, decodeSerialText(frame.raw_base64, textCharset));
   if (samples.length === 0) return;
   setWaveSamples((items) => [...items, ...samples].slice(-1800));
 }
 
-function useTimedSend(enabled: boolean, connected: boolean, sessionId: string | null | undefined, seconds: number, encoding: "text" | "hex", payload: string, setError: StateSetter<string | undefined>) {
+function useTimedSend(enabled: boolean, connected: boolean, sessionId: string | null | undefined, seconds: number, encoding: "text" | "hex", textCharset: TextCharset, payload: string, setError: StateSetter<string | undefined>) {
   useEffect(() => {
     if (!enabled || !connected || !sessionId || seconds <= 0) return;
-    const timer = window.setInterval(() => { void executeSerialCommand({ type: "send", session_id: sessionId, encoding, payload, timeout_ms: 1000 }).catch((cause) => setError(String(cause))); }, seconds * 1000);
+    const timer = window.setInterval(() => { void executeSerialCommand({ type: "send", session_id: sessionId, encoding, text_charset: textCharset, payload, timeout_ms: 1000 }).catch((cause) => setError(String(cause))); }, seconds * 1000);
     return () => window.clearInterval(timer);
-  }, [enabled, connected, sessionId, seconds, encoding, payload, setError]);
+  }, [enabled, connected, sessionId, seconds, encoding, textCharset, payload, setError]);
 }
 
 function useAutoReconnect(enabled: boolean, connected: boolean, manuallyClosedRef: MutableRefObject<boolean>, hasConnectedRef: MutableRefObject<boolean>, config: SerialConfig) {
@@ -300,8 +305,8 @@ function useAutoReconnect(enabled: boolean, connected: boolean, manuallyClosedRe
   }, [enabled, connected, manuallyClosedRef, hasConnectedRef, config]);
 }
 
-async function saveFrameLog(frames: SerialFrame[]) {
-  const content = [...frames].reverse().map((frame) => `${new Date(frame.timestamp_ms).toISOString()} ${frame.direction.toUpperCase()} ${frame.raw_hex}${frame.text_utf8 ? ` ${frame.text_utf8.trim()}` : ""}`).join("\n");
+async function saveFrameLog(frames: SerialFrame[], textCharset: TextCharset) {
+  const content = [...frames].reverse().map((frame) => `${new Date(frame.timestamp_ms).toISOString()} ${frame.direction.toUpperCase()} ${frame.raw_hex} ${decodeSerialText(frame.raw_base64, textCharset).trim()}`.trimEnd()).join("\n");
   const path = await save({ defaultPath: `serialpilot-${formatSaveTimestamp(new Date())}.txt`, filters: [{ name: "文本文件", extensions: ["txt"] }] });
   if (path) await saveTextFile(path, content);
 }

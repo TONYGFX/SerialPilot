@@ -25,6 +25,19 @@ const MULTI_CHANNEL_SAMPLES: &[&[u8]] = &[
     b"X1=109,X2=60,X3=25.8\r\n",
 ];
 
+// These frames are intentionally not UTF-8. They let the desktop text-charset
+// setting be verified without a physical device while waveform data stays ASCII.
+const TEXT_CHARSET_SAMPLES: &[&[u8]] = &[
+    b"ASCII: READY\r\n",
+    &[
+        0x47, 0x42, 0x4b, 0x3a, 0x20, 0xd6, 0xd0, 0xce, 0xc4, 0x0d, 0x0a,
+    ],
+    &[
+        0x55, 0x00, 0x54, 0x00, 0x46, 0x00, 0x2d, 0x00, 0x31, 0x00, 0x36, 0x00, 0x4c, 0x00, 0x45,
+        0x00, 0x3a, 0x00, 0x20, 0x00, 0x4b, 0x6d, 0xd5, 0x8b, 0x0d, 0x00, 0x0a, 0x00,
+    ],
+];
+
 /// Development-only adapter. It has no access to a physical serial device.
 #[derive(Default)]
 pub struct MockSerialAdapter;
@@ -52,6 +65,7 @@ impl SerialAdapter for MockSerialAdapter {
             tokio::time::sleep(Duration::from_millis(80)).await;
             let _ = handshake_tx.send(vec![0x43]).await;
         });
+        let response_tx = incoming_tx.clone();
         let sample_tx = incoming_tx.clone();
         tokio::spawn(async move {
             let mut ymodem_header_seen = false;
@@ -67,13 +81,13 @@ impl SerialAdapter for MockSerialAdapter {
                 if response[0] == 0xaa {
                     response.extend(payload);
                 }
-                if incoming_tx.send(response).await.is_err() {
+                if response_tx.send(response).await.is_err() {
                     break;
                 }
                 if is_ymodem_header && !ymodem_header_seen {
                     ymodem_header_seen = true;
                     tokio::time::sleep(Duration::from_millis(2)).await;
-                    if incoming_tx.send(vec![0x43]).await.is_err() {
+                    if response_tx.send(vec![0x43]).await.is_err() {
                         break;
                     }
                 }
@@ -88,6 +102,18 @@ impl SerialAdapter for MockSerialAdapter {
                 if sample_tx.send(sample.to_vec()).await.is_err() {
                     break;
                 }
+            }
+        });
+        tokio::spawn(async move {
+            let mut sample_index = 0usize;
+            tokio::time::sleep(Duration::from_millis(600)).await;
+            loop {
+                let sample = TEXT_CHARSET_SAMPLES[sample_index % TEXT_CHARSET_SAMPLES.len()];
+                sample_index += 1;
+                if incoming_tx.send(sample.to_vec()).await.is_err() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(900)).await;
             }
         });
 

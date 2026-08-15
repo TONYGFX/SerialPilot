@@ -23,6 +23,7 @@ tauri-build = { version = "2", features = [] }
 async-trait = "0.1"
 axum = "0.8"
 base64 = "0.22"
+encoding_rs = "0.8"
 hex = "0.4"
 regex = "1"
 serde = { version = "1", features = ["derive"] }

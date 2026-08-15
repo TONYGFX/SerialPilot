@@ -241,11 +241,12 @@ pub fn tools() -> Vec<Value> {
         ),
         tool(
             "serial.send",
-            "Send text, HEX, or base64 bytes through an active session.",
+            "Send text, HEX, or base64 bytes through an active session. text_charset applies only to text and defaults to UTF-8.",
             object_schema(
                 vec![
                     ("session_id", string_schema()),
                     ("encoding", string_enum(&["text", "hex", "base64"])),
+                    ("text_charset", text_charset_schema()),
                     ("payload", string_schema()),
                     ("action_id", string_schema()),
                     ("timeout_ms", integer_schema()),
@@ -292,7 +293,7 @@ pub fn tools() -> Vec<Value> {
         ),
         tool(
             "serial.wait_for",
-            "Wait a bounded time for matching RX data.",
+            "Wait a bounded time for matching RX data. condition.text_charset controls contains_text decoding and defaults to UTF-8.",
             object_schema(
                 vec![
                     ("session_id", string_schema()),
@@ -305,11 +306,12 @@ pub fn tools() -> Vec<Value> {
         ),
         tool(
             "serial.exchange",
-            "Send a request and capture a fast matching response from the background buffer.",
+            "Send a request and capture a fast matching response from the background buffer. text_charset applies only to text and defaults to UTF-8.",
             object_schema(
                 vec![
                     ("session_id", string_schema()),
                     ("encoding", string_enum(&["text", "hex", "base64"])),
+                    ("text_charset", text_charset_schema()),
                     ("payload", string_schema()),
                     ("condition", wait_condition_schema()),
                     ("timeout_ms", integer_schema()),
@@ -469,6 +471,10 @@ fn string_enum(values: &[&str]) -> Value {
     json!({ "type": "string", "enum": values })
 }
 
+fn text_charset_schema() -> Value {
+    string_enum(&["utf-8", "gbk", "ascii", "utf-16le"])
+}
+
 fn serial_config_schema() -> Value {
     object_schema(
         vec![
@@ -503,6 +509,7 @@ fn wait_condition_schema() -> Value {
     object_schema(
         vec![
             ("contains_text", string_schema()),
+            ("text_charset", text_charset_schema()),
             ("contains_hex", string_schema()),
             ("frame_prefix", string_schema()),
             ("regex", string_schema()),
@@ -516,6 +523,7 @@ fn batch_send_item_schema() -> Value {
     object_schema(
         vec![
             ("encoding", string_enum(&["text", "hex", "base64"])),
+            ("text_charset", text_charset_schema()),
             ("payload", string_schema()),
             ("timeout_ms", integer_schema()),
         ],
@@ -527,6 +535,7 @@ fn exchange_item_schema() -> Value {
     object_schema(
         vec![
             ("encoding", string_enum(&["text", "hex", "base64"])),
+            ("text_charset", text_charset_schema()),
             ("payload", string_schema()),
             ("condition", wait_condition_schema()),
             ("timeout_ms", integer_schema()),
@@ -538,7 +547,10 @@ fn exchange_item_schema() -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{command::FileTransferProtocol, serial::mock::MockSerialAdapter};
+    use crate::{
+        command::{FileTransferProtocol, TextCharset},
+        serial::mock::MockSerialAdapter,
+    };
     use std::sync::Arc;
 
     #[test]
@@ -616,6 +628,35 @@ mod tests {
             ),
             Ok(SerialCommand::WaveformAddChannel { .. })
         ));
+    }
+
+    #[test]
+    fn text_charset_is_available_to_mcp_text_commands() {
+        let command = tool_command(
+            "serial.send",
+            json!({
+                "session_id": "s",
+                "encoding": "text",
+                "text_charset": "gbk",
+                "payload": "中文"
+            }),
+        )
+        .unwrap();
+        assert!(matches!(
+            command,
+            SerialCommand::Send {
+                text_charset: Some(TextCharset::Gbk),
+                ..
+            }
+        ));
+        let charset = tools()
+            .into_iter()
+            .find(|tool| tool["name"] == "serial.send")
+            .map(|tool| tool["inputSchema"]["properties"]["text_charset"].clone());
+        assert_eq!(
+            charset,
+            Some(json!({ "type": "string", "enum": ["utf-8", "gbk", "ascii", "utf-16le"] }))
+        );
     }
 
     #[test]

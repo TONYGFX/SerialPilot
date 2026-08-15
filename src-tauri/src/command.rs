@@ -1,6 +1,7 @@
 use std::{collections::VecDeque, sync::Arc, time::Duration};
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use encoding_rs::{Encoding, GBK, UTF_16LE, UTF_8};
 use regex::bytes::Regex;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -41,6 +42,17 @@ pub enum DataEncoding {
     Text,
     Hex,
     Base64,
+}
+
+/// Charset used when a payload is handled as text rather than raw bytes.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum TextCharset {
+    #[default]
+    Utf8,
+    Gbk,
+    Ascii,
+    Utf16le,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -139,6 +151,8 @@ pub struct SessionStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WaitCondition {
     pub contains_text: Option<String>,
+    #[serde(default)]
+    pub text_charset: Option<TextCharset>,
     pub contains_hex: Option<String>,
     pub frame_prefix: Option<String>,
     pub regex: Option<String>,
@@ -157,6 +171,8 @@ pub struct WaveChannel {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatchSendItem {
     pub encoding: DataEncoding,
+    #[serde(default)]
+    pub text_charset: Option<TextCharset>,
     pub payload: String,
     pub timeout_ms: Option<u64>,
 }
@@ -182,7 +198,9 @@ impl WaitCondition {
             return true;
         }
         if let Some(expected) = &self.contains_text {
-            if !String::from_utf8_lossy(&bytes).contains(expected) {
+            if !decode_text(&bytes, self.text_charset.unwrap_or_default())
+                .is_some_and(|text| text.contains(expected))
+            {
                 return false;
             }
         }
@@ -230,6 +248,8 @@ pub enum SerialCommand {
     Send {
         session_id: String,
         encoding: DataEncoding,
+        #[serde(default)]
+        text_charset: Option<TextCharset>,
         payload: String,
         action_id: Option<String>,
         timeout_ms: Option<u64>,
@@ -262,6 +282,8 @@ pub enum SerialCommand {
     Exchange {
         session_id: String,
         encoding: DataEncoding,
+        #[serde(default)]
+        text_charset: Option<TextCharset>,
         payload: String,
         condition: WaitCondition,
         timeout_ms: u64,
@@ -315,6 +337,8 @@ pub enum SerialCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExchangeItem {
     pub encoding: DataEncoding,
+    #[serde(default)]
+    pub text_charset: Option<TextCharset>,
     pub payload: String,
     pub condition: WaitCondition,
     pub timeout_ms: u64,
@@ -571,12 +595,20 @@ impl SerialCore {
             SerialCommand::Send {
                 session_id,
                 encoding,
+                text_charset,
                 payload,
                 action_id,
                 timeout_ms,
             } => {
-                self.send(&session_id, encoding, payload, action_id, timeout_ms)
-                    .await
+                self.send(
+                    &session_id,
+                    encoding,
+                    text_charset.unwrap_or_default(),
+                    payload,
+                    action_id,
+                    timeout_ms,
+                )
+                .await
             }
             SerialCommand::SendFile {
                 session_id,
@@ -628,6 +660,7 @@ impl SerialCore {
             SerialCommand::Exchange {
                 session_id,
                 encoding,
+                text_charset,
                 payload,
                 condition,
                 timeout_ms,
@@ -636,6 +669,7 @@ impl SerialCore {
                 self.exchange(
                     &session_id,
                     encoding,
+                    text_charset.unwrap_or_default(),
                     payload,
                     condition,
                     timeout_ms,
@@ -772,6 +806,7 @@ impl SerialCore {
                 self.send(
                     session_id,
                     item.encoding,
+                    item.text_charset.unwrap_or_default(),
                     item.payload,
                     Some(format!(
                         "{}-{index}",
@@ -808,6 +843,7 @@ impl SerialCore {
                 self.exchange(
                     session_id,
                     item.encoding,
+                    item.text_charset.unwrap_or_default(),
                     item.payload,
                     item.condition,
                     item.timeout_ms,
@@ -999,6 +1035,7 @@ impl SerialCore {
         &self,
         session_id: &str,
         encoding: DataEncoding,
+        text_charset: TextCharset,
         payload: String,
         action_id: Option<String>,
         timeout_ms: Option<u64>,
@@ -1006,7 +1043,7 @@ impl SerialCore {
         if self.file_send.lock().await.is_some() {
             return Err(CoreError::FileSendBusy);
         }
-        let bytes = decode_payload(&encoding, &payload)?;
+        let bytes = decode_payload(&encoding, text_charset, &payload)?;
         let outgoing = {
             let state = self.state.lock().await;
             let session = state.session.as_ref().ok_or(CoreError::NotOpen)?;
@@ -1174,6 +1211,7 @@ impl SerialCore {
         &self,
         session_id: &str,
         encoding: DataEncoding,
+        text_charset: TextCharset,
         payload: String,
         condition: WaitCondition,
         timeout_ms: u64,
@@ -1182,7 +1220,14 @@ impl SerialCore {
         self.ensure_session(session_id).await?;
         let before_cursor = { self.state.lock().await.next_cursor.saturating_sub(1) };
         let sent = self
-            .send(session_id, encoding, payload, action_id, Some(timeout_ms))
+            .send(
+                session_id,
+                encoding,
+                text_charset,
+                payload,
+                action_id,
+                Some(timeout_ms),
+            )
             .await?;
         let id = match sent {
             CommandResult::Sent { action_id, .. } => action_id,
@@ -1691,9 +1736,13 @@ fn read_locked(
     }
 }
 
-fn decode_payload(encoding: &DataEncoding, payload: &str) -> Result<Vec<u8>, CoreError> {
+fn decode_payload(
+    encoding: &DataEncoding,
+    text_charset: TextCharset,
+    payload: &str,
+) -> Result<Vec<u8>, CoreError> {
     match encoding {
-        DataEncoding::Text => Ok(payload.as_bytes().to_vec()),
+        DataEncoding::Text => encode_text(payload, text_charset),
         DataEncoding::Hex => hex::decode(payload.replace([' ', ':'], "")).map_err(|error| {
             CoreError::InvalidPayload {
                 encoding: "hex".into(),
@@ -1706,6 +1755,54 @@ fn decode_payload(encoding: &DataEncoding, payload: &str) -> Result<Vec<u8>, Cor
                 encoding: "base64".into(),
                 reason: error.to_string(),
             }),
+    }
+}
+
+fn encode_text(payload: &str, charset: TextCharset) -> Result<Vec<u8>, CoreError> {
+    if charset == TextCharset::Ascii {
+        return payload
+            .is_ascii()
+            .then(|| payload.as_bytes().to_vec())
+            .ok_or_else(|| CoreError::InvalidPayload {
+                encoding: "ascii".into(),
+                reason: "ASCII text cannot contain non-ASCII characters".into(),
+            });
+    }
+    let (bytes, _, had_replacements) = charset_encoding(charset).encode(payload);
+    if had_replacements {
+        return Err(CoreError::InvalidPayload {
+            encoding: charset_name(charset).into(),
+            reason: "text contains characters that cannot be represented by this encoding".into(),
+        });
+    }
+    Ok(bytes.into_owned())
+}
+
+fn decode_text(bytes: &[u8], charset: TextCharset) -> Option<String> {
+    if charset == TextCharset::Ascii {
+        return bytes
+            .is_ascii()
+            .then(|| String::from_utf8_lossy(bytes).into_owned());
+    }
+    let (text, _, had_replacements) = charset_encoding(charset).decode(bytes);
+    (!had_replacements).then(|| text.into_owned())
+}
+
+fn charset_encoding(charset: TextCharset) -> &'static Encoding {
+    match charset {
+        TextCharset::Utf8 => UTF_8,
+        TextCharset::Gbk => GBK,
+        TextCharset::Utf16le => UTF_16LE,
+        TextCharset::Ascii => unreachable!("ASCII is handled without encoding_rs"),
+    }
+}
+
+fn charset_name(charset: TextCharset) -> &'static str {
+    match charset {
+        TextCharset::Utf8 => "utf-8",
+        TextCharset::Gbk => "gbk",
+        TextCharset::Ascii => "ascii",
+        TextCharset::Utf16le => "utf-16le",
     }
 }
 
@@ -1802,6 +1899,7 @@ mod tests {
         core.execute(SerialCommand::Send {
             session_id: session.clone(),
             encoding: DataEncoding::Hex,
+            text_charset: None,
             payload: "0102".into(),
             action_id: None,
             timeout_ms: None,
@@ -1873,6 +1971,7 @@ mod tests {
                 after_cursor: cursor,
                 condition: WaitCondition {
                     contains_text: Some("never-arrives".into()),
+                    text_charset: None,
                     contains_hex: None,
                     frame_prefix: None,
                     regex: None,
@@ -1901,6 +2000,7 @@ mod tests {
                 after_cursor: cursor,
                 condition: WaitCondition {
                     contains_text: Some("X1=100,X2=52,X3=24".into()),
+                    text_charset: None,
                     contains_hex: None,
                     frame_prefix: None,
                     regex: None,
@@ -1928,9 +2028,11 @@ mod tests {
             .execute(SerialCommand::Exchange {
                 session_id: session,
                 encoding: DataEncoding::Hex,
+                text_charset: None,
                 payload: "DEAD".into(),
                 condition: WaitCondition {
                     contains_text: None,
+                    text_charset: None,
                     contains_hex: None,
                     frame_prefix: Some("AA55".into()),
                     regex: None,
@@ -1952,6 +2054,48 @@ mod tests {
             }
             _ => unreachable!(),
         }
+    }
+
+    #[tokio::test]
+    async fn sends_gbk_text_as_gbk_bytes() {
+        let core = core();
+        let (session, _) = open(&core).await;
+        let result = core
+            .execute(SerialCommand::Send {
+                session_id: session,
+                encoding: DataEncoding::Text,
+                text_charset: Some(TextCharset::Gbk),
+                payload: "中文".into(),
+                action_id: None,
+                timeout_ms: None,
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            result,
+            CommandResult::Sent { frame, .. } if frame.raw_hex == "D6D0CEC4"
+        ));
+    }
+
+    #[test]
+    fn matches_gbk_text_with_the_selected_charset() {
+        let frame = Frame {
+            cursor: 1,
+            timestamp_ms: 0,
+            direction: Direction::Rx,
+            raw_base64: BASE64.encode([0xd6, 0xd0, 0xce, 0xc4]),
+            raw_hex: "D6D0CEC4".into(),
+            text_utf8: None,
+        };
+        let condition = WaitCondition {
+            contains_text: Some("中文".into()),
+            text_charset: Some(TextCharset::Gbk),
+            contains_hex: None,
+            frame_prefix: None,
+            regex: None,
+            protocol_field: None,
+        };
+        assert!(condition.matches(&frame));
     }
 
     #[tokio::test]

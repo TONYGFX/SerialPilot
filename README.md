@@ -19,6 +19,7 @@ SerialPilot 面向嵌入式开发、硬件调试和串口自动化场景。它�
 - 原生桌面工作区：可调整大小的配置栏、终端日志区和波形工作区，窗口变化时自动填充客户区。
 - 可靠串口核心：后台持续接收、固定容量 RX 缓冲、游标读取、超时等待和请求-响应事务。
 - 完整数据保留：发送和接收均保留原始字节，同时提供文本、HEX 和 Base64 数据处理。
+- 可选文本编码：终端文本收发、文本匹配和波形解析支持 UTF-8、GBK、ASCII、UTF-16LE；HEX 始终显示原始字节。
 - 多通道波形：自定义通道名称和颜色，支持跟随最新数据、拖拽平移、横轴缩放和悬浮查看采样值。
 - **文件发送**：选择文件后直接放入发送工作区，支持 Null、Xmodem、Xmodem-1k 和 Ymodem 等传输协议，实时显示进度、已发送字节和取消状态。
 - **AI 原生控制**：MCP 通过结构化工具完成端口枚举、参数配置、发送、持续接收、请求-响应事务和波形通道管理，AI 不需要截图、视觉识别或模拟点击界面。
@@ -121,6 +122,21 @@ http://127.0.0.1:3030/mcp
 - 波形：`waveform.list_channels`、`waveform.add_channel`、`waveform.update_channel`、`waveform.remove_channel`、`waveform.clear_samples`
 
 当前 HTTP 实现使用 Streamable HTTP，不使用 SSE；SSE/实时事件流仅用于桌面端内部状态同步。
+
+### 文本编码
+
+在“设置 -> 通用 -> 文本编码”中选择 `UTF-8`（默认）、`GBK`、`ASCII` 或 `UTF-16LE`。该选择同时用于终端文本显示、文本发送、波形的命名数值帧解析和桌面端定时发送；切换编码会重新解释已记录的原始字节，不会改写或清空串口记录。主界面保持“文本 / HEX”两种数据格式，其中 HEX 始终按字节显示。
+
+MCP 的 `serial.send`、`serial.exchange` 及批量请求可选传入 `text_charset`；`serial.wait_for` 的 `condition.text_charset` 决定 `contains_text` 的匹配编码。未传入时保持兼容，默认使用 `utf-8`。
+
+```json
+{
+  "session_id": "<session_id>",
+  "encoding": "text",
+  "text_charset": "gbk",
+  "payload": "设备测试"
+}
+```
 
 ## 下载与运行
 
