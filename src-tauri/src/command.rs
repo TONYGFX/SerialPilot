@@ -458,6 +458,7 @@ struct ActiveSession {
     id: String,
     config: SerialConfig,
     outgoing: tokio::sync::mpsc::Sender<Vec<u8>>,
+    file_transfer_control: Option<tokio::sync::mpsc::Sender<FileTransferProtocol>>,
     reader: JoinHandle<()>,
     shutdown: Option<Arc<std::sync::atomic::AtomicBool>>,
     workers: Vec<std::thread::JoinHandle<()>>,
@@ -956,6 +957,7 @@ impl SerialCore {
         let AdapterConnection {
             mut incoming,
             outgoing,
+            file_transfer_control,
             shutdown,
             workers,
         } = self.adapter.open(&config).await?;
@@ -977,6 +979,7 @@ impl SerialCore {
                 id: id.clone(),
                 config,
                 outgoing,
+                file_transfer_control,
                 reader,
                 shutdown,
                 workers,
@@ -1099,6 +1102,7 @@ impl SerialCore {
         let file_size = metadata.len();
         self.ensure_session(session_id).await?;
         let outgoing = self.session_sender(session_id).await?;
+        let file_transfer_control = self.file_transfer_control(session_id).await?;
         {
             let mut active = self.file_send.lock().await;
             if active.is_some() {
@@ -1127,6 +1131,7 @@ impl SerialCore {
                 interval_ms,
                 timeout_ms,
                 outgoing,
+                file_transfer_control,
                 &state,
                 &events,
                 &audit,
@@ -1205,6 +1210,18 @@ impl SerialCore {
             return Err(CoreError::InvalidSession);
         }
         Ok(session.outgoing.clone())
+    }
+
+    async fn file_transfer_control(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<tokio::sync::mpsc::Sender<FileTransferProtocol>>, CoreError> {
+        let state = self.state.lock().await;
+        let session = state.session.as_ref().ok_or(CoreError::NotOpen)?;
+        if session.id != session_id {
+            return Err(CoreError::InvalidSession);
+        }
+        Ok(session.file_transfer_control.clone())
     }
 
     async fn exchange(
@@ -1369,6 +1386,7 @@ async fn stream_file(
     interval_ms: u64,
     timeout_ms: u64,
     outgoing: tokio::sync::mpsc::Sender<Vec<u8>>,
+    file_transfer_control: Option<tokio::sync::mpsc::Sender<FileTransferProtocol>>,
     state: &Arc<Mutex<State>>,
     events: &broadcast::Sender<SerialEvent>,
     audit: &Arc<std::sync::Mutex<VecDeque<SerialEvent>>>,
@@ -1383,6 +1401,9 @@ async fn stream_file(
     let mut buffer = vec![0u8; chunk_size];
     let cursor = state.lock().await.next_cursor.saturating_sub(1);
     if protocol != FileTransferProtocol::Null {
+        if let Some(control) = file_transfer_control {
+            let _ = control.send(protocol.clone()).await;
+        }
         if wait_for_control(
             state,
             changed,
@@ -2170,6 +2191,92 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn mock_completes_xmodem_and_ymodem_transfers() {
+        for protocol in [
+            FileTransferProtocol::Xmodem,
+            FileTransferProtocol::Xmodem1k,
+            FileTransferProtocol::Ymodem,
+        ] {
+            let core = core();
+            let (session, cursor) = open(&core).await;
+            let protocol_name = file_transfer_protocol_label(&protocol);
+            let path = std::env::temp_dir().join(format!(
+                "serialpilot-{}-{}.bin",
+                protocol_name,
+                SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            ));
+            let file_bytes = vec![0x5a; 1_300];
+            tokio::fs::write(&path, &file_bytes).await.unwrap();
+            let action_id = format!("mock-{protocol_name}");
+            let mut events = core.subscribe();
+            core.execute(SerialCommand::SendFile {
+                session_id: session.clone(),
+                file_path: path.to_string_lossy().into_owned(),
+                protocol: protocol.clone(),
+                chunk_size: 1,
+                interval_ms: 0,
+                timeout_ms: Some(250),
+                action_id: Some(action_id.clone()),
+            })
+            .await
+            .unwrap();
+
+            let progress = wait_for_file_completion(&mut events, &action_id).await;
+            let read = match core
+                .execute(SerialCommand::ReadSince {
+                    session_id: session,
+                    after_cursor: cursor,
+                    max_bytes: 64 * 1024,
+                    max_frames: 512,
+                })
+                .await
+                .unwrap()
+            {
+                CommandResult::Read { read } => read,
+                _ => unreachable!(),
+            };
+            assert!(progress.completed, "{protocol:?} should complete");
+            assert_eq!(progress.sent_bytes, file_bytes.len() as u64);
+            assert!(read.frames.iter().any(|frame| frame.raw_hex == "43"));
+            assert!(read.frames.iter().any(|frame| frame.raw_hex == "06"));
+            tokio::fs::remove_file(path).await.unwrap();
+        }
+    }
+
+    async fn wait_for_file_completion(
+        events: &mut broadcast::Receiver<SerialEvent>,
+        action_id: &str,
+    ) -> FileProgress {
+        timeout(Duration::from_secs(3), async {
+            loop {
+                let event = events.recv().await.expect("file progress event");
+                if !matches!(event.kind, EventKind::FileProgress) {
+                    continue;
+                }
+                let progress = serde_json::from_value::<FileProgress>(event.detail)
+                    .expect("valid file progress payload");
+                if progress.action_id == action_id && (progress.completed || progress.cancelled) {
+                    return progress;
+                }
+            }
+        })
+        .await
+        .expect("mock file transfer should finish")
+    }
+
+    fn file_transfer_protocol_label(protocol: &FileTransferProtocol) -> &'static str {
+        match protocol {
+            FileTransferProtocol::Null => "null",
+            FileTransferProtocol::Xmodem => "xmodem",
+            FileTransferProtocol::Xmodem1k => "xmodem-1k",
+            FileTransferProtocol::Ymodem => "ymodem",
+        }
+    }
+
+    #[tokio::test]
     async fn file_send_can_be_cancelled() {
         let core = core();
         let (session, _) = open(&core).await;
@@ -2201,7 +2308,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn xmodem_without_handshake_can_be_cancelled_immediately() {
+    async fn xmodem_transfer_can_be_cancelled_immediately() {
         let core = core();
         let (session, _) = open(&core).await;
         let path = std::env::temp_dir().join(format!(

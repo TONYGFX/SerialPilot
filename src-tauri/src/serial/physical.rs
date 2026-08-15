@@ -95,6 +95,7 @@ impl SerialAdapter for PhysicalSerialAdapter {
         Ok(AdapterConnection {
             incoming,
             outgoing,
+            file_transfer_control: None,
             shutdown: Some(shutdown),
             workers: vec![reader_worker, writer_worker],
         })

@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 
 use crate::{
-    command::{CoreError, PortInfo, SerialConfig},
+    command::{CoreError, FileTransferProtocol, PortInfo, SerialConfig},
     serial::{AdapterConnection, SerialAdapter},
 };
 
@@ -59,14 +59,10 @@ impl SerialAdapter for MockSerialAdapter {
 
         let (outgoing, mut writes) = mpsc::channel::<Vec<u8>>(64);
         let (incoming_tx, incoming) = mpsc::channel::<Vec<u8>>(64);
-        let handshake_tx = incoming_tx.clone();
-        tokio::spawn(async move {
-            // Keep the protocol handshake outside the normal send/read test window.
-            tokio::time::sleep(Duration::from_millis(80)).await;
-            let _ = handshake_tx.send(vec![0x43]).await;
-        });
+        let (file_transfer_control, mut transfer_requests) = mpsc::channel(8);
         let response_tx = incoming_tx.clone();
         let sample_tx = incoming_tx.clone();
+        let transfer_tx = incoming_tx.clone();
         tokio::spawn(async move {
             let mut ymodem_header_seen = false;
             while let Some(payload) = writes.recv().await {
@@ -90,6 +86,19 @@ impl SerialAdapter for MockSerialAdapter {
                     if response_tx.send(vec![0x43]).await.is_err() {
                         break;
                     }
+                }
+            }
+        });
+        tokio::spawn(async move {
+            while let Some(protocol) = transfer_requests.recv().await {
+                if protocol == FileTransferProtocol::Null {
+                    continue;
+                }
+                // The core records its receive cursor before sending this request,
+                // so this CRC handshake is always visible to X/Ymodem waiters.
+                tokio::time::sleep(Duration::from_millis(4)).await;
+                if transfer_tx.send(vec![0x43]).await.is_err() {
+                    break;
                 }
             }
         });
@@ -120,6 +129,7 @@ impl SerialAdapter for MockSerialAdapter {
         Ok(AdapterConnection {
             incoming,
             outgoing,
+            file_transfer_control: Some(file_transfer_control),
             shutdown: None,
             workers: Vec::new(),
         })
