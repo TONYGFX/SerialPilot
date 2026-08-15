@@ -408,11 +408,20 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .wave-svg { display: block; width: 100%; height: 100%; min-height: 0; cursor: inherit; }
 .wave-hover { position: absolute; z-index: 5; display: grid; gap: 3px; min-width: 138px; padding: 7px 9px; border: 1px solid #46615a; border-radius: 2px; background: rgb(13 21 20 / 94%); box-shadow: 0 6px 18px rgb(0 0 0 / 30%); color: #b8c8c5; font: 10px var(--serial-mono-font); pointer-events: none; }
 .wave-hover strong { font-size: 11px; }
+.wave-crosshair-tooltip { min-width: 164px; gap: 5px; }
+.wave-hover-value { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 6px; color: #b8c8c5; }
+.wave-hover-value i { width: 7px; height: 7px; border-radius: 50%; }
+.wave-hover-value b { color: #e5efeb; font: inherit; text-align: right; }
 .wave-frame { fill: #11191c; stroke: #35434a; stroke-width: 1; }
 .wave-grid { stroke: #405058; stroke-width: 1; stroke-dasharray: 1 7; }
 .wave-label { fill: #829299; font: 12px var(--serial-mono-font); }
 .wave-line { fill: none; stroke: #61d792; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
 .wave-point { fill: #b7f3cd; stroke: #61d792; stroke-width: 2; }
+.wave-crosshair { pointer-events: none; }
+.wave-crosshair-line { stroke: #b5c9c2; stroke-width: 1; stroke-dasharray: 4 4; vector-effect: non-scaling-stroke; }
+.wave-crosshair-vertical { stroke-dasharray: none; opacity: .84; }
+.wave-crosshair-horizontal { opacity: .44; }
+.wave-crosshair-marker { fill: #101618; stroke-width: 2.5; }
 .wave-empty { position: absolute; z-index: 1; top: 50%; left: 50%; margin: 0; color: #718189; font-size: 12px; pointer-events: none; transform: translate(-50%, -50%); }
 .wave-save-error { position: absolute; z-index: 6; right: 18px; bottom: 42px; max-width: min(480px, calc(100% - 36px)); margin: 0; padding: 6px 8px; border: 1px solid #70423f; background: #291d1d; color: #d9958d; font: 10px var(--serial-mono-font); }
 .wave-footer { position: absolute; z-index: 2; right: 18px; bottom: 10px; left: 18px; display: flex; align-items: center; justify-content: space-between; min-height: 24px; padding: 0 8px; border-top: 1px solid rgb(64 80 88 / 65%); background: rgb(16 22 24 / 72%); color: #718189; font-size: 10px; pointer-events: none; }
@@ -524,11 +533,15 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .app-shell[data-theme="light"] .wave-axis { border-color: #b9c7cb; background: #f8fbfb; }
 .app-shell[data-theme="light"] .wave-viewport:focus { outline-color: rgb(45 133 81 / 58%); }
 .app-shell[data-theme="light"] .wave-hover { border-color: #9db9a6; background: rgb(255 255 255 / 96%); color: #405a62; box-shadow: 0 6px 18px rgb(36 56 63 / 17%); }
+.app-shell[data-theme="light"] .wave-hover-value { color: #405a62; }
+.app-shell[data-theme="light"] .wave-hover-value b { color: #20343a; }
 .app-shell[data-theme="light"] .wave-frame { fill: #fbfdfd; stroke: #b9c7cb; }
 .app-shell[data-theme="light"] .wave-grid { stroke: #aebfc3; }
 .app-shell[data-theme="light"] .wave-label { fill: #647b83; }
 .app-shell[data-theme="light"] .wave-line { stroke: #29995a; }
 .app-shell[data-theme="light"] .wave-point { fill: #ddf6e5; stroke: #29995a; }
+.app-shell[data-theme="light"] .wave-crosshair-line { stroke: #58737a; }
+.app-shell[data-theme="light"] .wave-crosshair-marker { fill: #f8fbfb; }
 .app-shell[data-theme="light"] .wave-toolbar { border-color: rgb(176 195 199 / 70%); background: rgb(248 251 251 / 91%); }
 .app-shell[data-theme="light"] .wave-toolbar p, .app-shell[data-theme="light"] .wave-meta, .app-shell[data-theme="light"] .wave-footer, .app-shell[data-theme="light"] .wave-empty { color: #667d85; }
 .app-shell[data-theme="light"] .wave-action { border-color: #bdcbcf; background: #f2f6f7; color: #456068; }

@@ -19,7 +19,7 @@ import {
 import { save } from "@tauri-apps/plugin-dialog";
 import { Icon } from "./Icon";
 import { saveTextFile } from "../services/serialClient";
-import { buildWaveChart, formatElapsedTime, formatWaveValue } from "../lib/waveform";
+import { buildWaveChart, formatElapsedTime, formatWaveValue, type ChartPoint, type WaveChart } from "../lib/waveform";
 import type { WaveChannel, WaveSample, WaveformSettings } from "../types/waveform";
 
 type WaveformPanelProps = {
@@ -51,7 +51,7 @@ const MAX_TIME_WINDOW_MS = 24 * 60 * 60 * 1000;
 export function WaveformPanel({ samples, channels, connected, paused, onPause, onClear, onChannelsChange }: WaveformPanelProps) {
   const plot = useRef<HTMLDivElement>(null);
   const toolbar = useRef<HTMLDivElement>(null);
-  const [hover, setHover] = useState<HoverPoint>();
+  const [crosshair, setCrosshair] = useState<SharedCrosshair>();
   const [saveError, setSaveError] = useState<string>();
   const [settings, setSettings] = useState<WaveformSettings>(DEFAULT_SETTINGS);
   const [openMenu, setOpenMenu] = useState<OpenMenu>();
@@ -79,6 +79,7 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     setFollowingLatest(false);
+    setCrosshair(undefined);
     event.currentTarget.setPointerCapture(event.pointerId);
     drag.current = { startX: event.clientX, startY: event.clientY, originX: effectiveStart, originY: 0 };
     setDragging(true);
@@ -132,13 +133,13 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
             <WaveYAxis chart={chart} height={viewport.height - WAVE_TOOLBAR_HEIGHT} />
           </div>
         </div>
-        <div className={"wave-viewport " + (dragging ? "dragging" : "")} tabIndex={0} aria-label="波形绘图区，Ctrl 加滚轮缩放横轴，拖拽平移曲线" onKeyDown={handleKeyDown} onWheel={handleWheel} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} onMouseLeave={() => setHover(undefined)}>
+        <div className={"wave-viewport " + (dragging ? "dragging" : "")} tabIndex={0} aria-label="波形绘图区，Ctrl 加滚轮缩放横轴，拖拽平移曲线" onKeyDown={handleKeyDown} onWheel={handleWheel} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} onMouseLeave={() => setCrosshair(undefined)}>
           <div className="wave-pan-layer" style={{ width: chart.viewportWidth, height: chart.viewportHeight }}>
-            <WaveSvg chart={chart} plot={plot} showLatestMarker={settings.showLatestMarker} onHover={setHover} onLeave={() => setHover(undefined)} />
+            <WaveSvg chart={chart} crosshair={crosshair} dragging={dragging} plot={plot} showLatestMarker={settings.showLatestMarker} onCrosshair={setCrosshair} onLeave={() => setCrosshair(undefined)} />
           </div>
         </div>
       </div>
-      {hover && <WaveHover point={hover} />}
+      {crosshair && <WaveCrosshairTooltip crosshair={crosshair} />}
       {chart.series.length === 0 && <p className="wave-empty">{getEmptyMessage(connected, channels, paused)}</p>}
       <div className="wave-overlay" ref={toolbar}>
         <WaveToolbar
@@ -164,7 +165,19 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
   </section>;
 }
 
-type HoverPoint = { point: ReturnType<typeof buildWaveChart>["series"][number]["points"][number]; channel: WaveChannel; originMs: number; left: number; top: number };
+type SharedCrosshair = {
+  x: number;
+  y: number;
+  timestampMs: number;
+  originMs: number;
+  left: number;
+  top: number;
+  plotWidth: number;
+  plotHeight: number;
+  points: Array<{ point: ChartPoint; channel: WaveChannel }>;
+};
+
+type SharedCrosshairCandidate = Omit<SharedCrosshair, "originMs" | "left" | "top" | "plotWidth" | "plotHeight">;
 
 function WaveYAxis({ chart, height }: { chart: ReturnType<typeof buildWaveChart>; height: number }) {
   return <svg className="wave-axis-svg" width={WAVE_AXIS_WIDTH} height={chart.viewportHeight} viewBox={`0 0 ${WAVE_AXIS_WIDTH} ${chart.viewportHeight}`} preserveAspectRatio="none">
@@ -175,17 +188,25 @@ function WaveYAxis({ chart, height }: { chart: ReturnType<typeof buildWaveChart>
   </svg>;
 }
 
-function WaveSvg({ chart, plot, showLatestMarker, onHover, onLeave }: { chart: ReturnType<typeof buildWaveChart>; plot: RefObject<HTMLDivElement>; showLatestMarker: boolean; onHover: (hover: HoverPoint) => void; onLeave: () => void }) {
+function WaveSvg({ chart, crosshair, dragging, plot, showLatestMarker, onCrosshair, onLeave }: { chart: WaveChart; crosshair?: SharedCrosshair; dragging: boolean; plot: RefObject<HTMLDivElement>; showLatestMarker: boolean; onCrosshair: (crosshair: SharedCrosshair) => void; onLeave: () => void }) {
   const viewBox = "0 0 " + chart.viewportWidth + " " + chart.viewportHeight;
   const handleMove = (event: ReactMouseEvent<SVGSVGElement>) => {
+    if (dragging) return;
     const bounds = event.currentTarget.getBoundingClientRect();
     const x = (event.clientX - bounds.left) * chart.viewportWidth / bounds.width;
     const y = (event.clientY - bounds.top) * chart.viewportHeight / bounds.height;
-    const nearest = findNearestPoint(chart, x, y);
-    if (!nearest) return onLeave();
+    const candidate = findSharedCrosshair(chart, x, y);
+    if (!candidate) return onLeave();
     const plotBounds = plot.current?.getBoundingClientRect();
     if (!plotBounds) return onLeave();
-    onHover({ ...nearest, originMs: chart.timeRange.originMs, left: event.clientX - plotBounds.left, top: event.clientY - plotBounds.top });
+    onCrosshair({
+      ...candidate,
+      originMs: chart.timeRange.originMs,
+      left: event.clientX - plotBounds.left,
+      top: event.clientY - plotBounds.top,
+      plotWidth: plotBounds.width,
+      plotHeight: plotBounds.height,
+    });
   };
   return <svg className="wave-svg" viewBox={viewBox} preserveAspectRatio="none" role="img" aria-label="配置通道的串口接收数据波形" onMouseMove={handleMove} onMouseLeave={onLeave}>
     <rect x={chart.left} y={chart.top} width={chart.plotWidth} height={chart.plotHeight} className="wave-frame" />
@@ -193,31 +214,48 @@ function WaveSvg({ chart, plot, showLatestMarker, onHover, onLeave }: { chart: R
     {chart.verticalGrid.map((grid, index) => <g key={"v-" + index}><line x1={grid.x} y1={chart.top} x2={grid.x} y2={chart.bottom} className="wave-grid" /><text x={grid.x} y={chart.labelBaseline} className="wave-label" textAnchor={index === 0 ? "start" : index === chart.verticalGrid.length - 1 ? "end" : "middle"}>{grid.label}</text></g>)}
     {chart.series.map((series) => <path key={series.channel.id} d={series.path} className="wave-line" style={{ stroke: series.channel.color }} />)}
     {showLatestMarker && chart.series.map((series) => series.lastPoint && <circle key={"point-" + series.channel.id} cx={series.lastPoint.x} cy={series.lastPoint.y} r="4.5" className="wave-point" style={{ fill: series.channel.color, stroke: series.channel.color }} />)}
+    {crosshair && <SharedCrosshairOverlay crosshair={crosshair} chart={chart} />}
   </svg>;
 }
 
-function findNearestPoint(chart: ReturnType<typeof buildWaveChart>, x: number, y: number): { point: HoverPoint["point"]; channel: WaveChannel } | undefined {
-  let nearest: { point: HoverPoint["point"]; channel: WaveChannel; distance: number } | undefined;
-  for (const series of chart.series) {
-    for (const point of series.points) {
-      const distance = Math.hypot(point.x - x, point.y - y);
-      if (distance > 22 || (nearest && distance >= nearest.distance)) continue;
-      nearest = { point, channel: series.channel, distance };
-    }
-  }
-  return nearest;
+function SharedCrosshairOverlay({ chart, crosshair }: { chart: WaveChart; crosshair: SharedCrosshair }) {
+  return <g className="wave-crosshair" aria-hidden="true">
+    <line className="wave-crosshair-line wave-crosshair-vertical" x1={crosshair.x} y1={chart.top} x2={crosshair.x} y2={chart.bottom} />
+    <line className="wave-crosshair-line wave-crosshair-horizontal" x1={chart.left} y1={crosshair.y} x2={chart.right} y2={crosshair.y} />
+    {crosshair.points.map(({ channel, point }) => <circle key={channel.id} className="wave-crosshair-marker" cx={point.x} cy={point.y} r="4.5" style={{ stroke: channel.color }} />)}
+  </g>;
 }
 
-function WaveHover({ point }: { point: HoverPoint }) {
-  const left = Math.min(Math.max(point.left + 14, 12), 420);
-  const top = Math.max(point.top - 74, 74);
-  return <div className="wave-hover" style={{ left, top }}>
-    <strong style={{ color: point.channel.color }}>{point.channel.name}</strong>
-    <span>值 {formatWaveValue(point.point.sample.value)}</span>
-    <span>时间 {formatElapsedTime(point.point.sample.timestampMs - point.originMs)}</span>
-    <span>游标 #{point.point.sample.cursor}</span>
+/** Finds the nearest common timestamp and its closest real sample per visible channel. */
+export function findSharedCrosshair(chart: WaveChart, x: number, y: number): SharedCrosshairCandidate | undefined {
+  if (x < chart.left || x > chart.right || y < chart.top || y > chart.bottom) return undefined;
+  const anchors = chart.series.flatMap((series) => series.points.map((point) => ({ point, channel: series.channel })));
+  if (anchors.length === 0) return undefined;
+  const anchor = anchors.reduce((nearest, candidate) => Math.abs(candidate.point.x - x) < Math.abs(nearest.point.x - x) ? candidate : nearest);
+  const points = chart.series.flatMap((series) => {
+    const nearest = series.points.reduce<ChartPoint | undefined>((closest, point) => {
+      if (!closest || Math.abs(point.sample.timestampMs - anchor.point.sample.timestampMs) < Math.abs(closest.sample.timestampMs - anchor.point.sample.timestampMs)) return point;
+      return closest;
+    }, undefined);
+    return nearest ? [{ point: nearest, channel: series.channel }] : [];
+  });
+  return { x: anchor.point.x, y, timestampMs: anchor.point.sample.timestampMs, points };
+}
+
+function WaveCrosshairTooltip({ crosshair }: { crosshair: SharedCrosshair }) {
+  const left = clampTooltipPosition(crosshair.left + 14, 12, crosshair.plotWidth - 190);
+  const top = clampTooltipPosition(crosshair.top + 14, WAVE_TOOLBAR_HEIGHT + 8, crosshair.plotHeight - 120);
+  return <div className="wave-hover wave-crosshair-tooltip" style={{ left, top }}>
+    <strong>{formatElapsedTime(crosshair.timestampMs - crosshair.originMs)}</strong>
+    {crosshair.points.map(({ channel, point }) => <span className="wave-hover-value" key={channel.id}><i style={{ backgroundColor: channel.color }} />{channel.name}<b>{formatWaveValue(point.sample.value)}</b></span>)}
   </div>;
 }
+
+function clampTooltipPosition(value: number, minimum: number, maximum: number) {
+  return Math.max(minimum, Math.min(value, Math.max(minimum, maximum)));
+}
+
+export const waveformInteractionHelpers = { findSharedCrosshair };
 
 function WaveToolbar({ channelCount, connected, followingLatest, openMenu, paused, onClear, onSave, onJumpToLatest, onPause, onToggleMenu }: {
   channelCount: number;
