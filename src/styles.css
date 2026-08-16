@@ -322,6 +322,7 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .file-progress-line > button { flex: 0 0 auto; white-space: nowrap; }
 .file-progress-actions { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; }
 .file-picker.file-cancel, .file-progress-line .file-cancel { min-height: 21px; padding: 0 7px; border: 1px solid #70423f; border-radius: 2px; background: #291d1d; color: #d9958d; font-size: 9px; }
+.file-settings > .file-picker.file-cancel { min-height: 31px; }
 .file-progress-line .file-cancel { order: 3; }
 .file-picker.file-cancel:hover, .file-progress-line .file-cancel:hover { border-color: #b6534d; background: #3a2321; color: #fff; }
 .file-dismiss { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 21px; padding: 0 7px; border: 1px solid #40535a; border-radius: 2px; background: #202b30; color: #b4c4c7; font-size: 9px; }
