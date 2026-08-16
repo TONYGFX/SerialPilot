@@ -294,6 +294,7 @@ code { overflow: hidden; color: #d7e5e0; font: 11px var(--serial-mono-font); tex
 textarea { display: block; width: 100%; min-height: 0; height: auto; resize: none; border-radius: 0; padding: 9px 14px; font: 11px var(--serial-mono-font); }
 .file-settings { display: grid; gap: 8px; min-width: 0; }
 .file-settings h2 { margin: 0; }
+.file-settings-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
 .file-mode { width: fit-content; }
 .file-settings-picker { display: block; min-width: 0; }
 .file-settings-picker .file-picker, .file-settings > .file-picker { width: 100%; }
