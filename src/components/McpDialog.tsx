@@ -137,7 +137,8 @@ type VersionUpdateDetailsProps = {
 /** Renders update controls as rows in the About version details. */
 function VersionUpdateDetails({ status, onCheck }: VersionUpdateDetailsProps) {
   const checking = status.state === "checking";
-  const checkedRelease = status.state === "available" || status.state === "up-to-date" ? status.release : undefined;
+  const availableRelease = status.state === "available" ? status.release : undefined;
+  const isUpToDate = status.state === "up-to-date";
 
-  return <div><dt>版本</dt><dd className="about-version"><span>{APP_VERSION}</span>{checkedRelease ? <button type="button" className="about-link about-release-version" title={`在 GitHub 查看 v${checkedRelease.version}`} onClick={() => void openUrl(checkedRelease.releaseUrl)}>v{checkedRelease.version}</button> : <button type="button" className="secondary about-check-button" disabled={checking} onClick={onCheck}>{checking ? "正在检查" : "检查更新"}</button>}</dd></div>;
+  return <div><dt>版本</dt><dd className="about-version"><span>{APP_VERSION}</span>{availableRelease ? <button type="button" className="about-link about-release-version" title={`在 GitHub 查看 v${availableRelease.version}`} onClick={() => void openUrl(availableRelease.releaseUrl)}>v{availableRelease.version}</button> : isUpToDate ? <span className="about-up-to-date">已是最新版本</span> : <button type="button" className="secondary about-check-button" disabled={checking} onClick={onCheck}>{checking ? "正在检查" : "检查更新"}</button>}</dd></div>;
 }
