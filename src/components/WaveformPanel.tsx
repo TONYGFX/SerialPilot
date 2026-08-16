@@ -81,9 +81,7 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
   const latestTimestampForView = samples.at(-1)?.timestampMs;
   useFollowedValueRange(samples, followingLatest, plotDimensions.height, setValueViewport);
   const updateTimeStart = (next: number, windowMs = timeWindowMs) => {
-    const minimumStart = firstTimestamp ?? next;
-    const maximumStart = Math.max(minimumStart, (latestTimestampForView ?? next) - windowMs);
-    setTimeStartMs(Math.min(maximumStart, Math.max(minimumStart, next)));
+    setTimeStartMs(clampWaveTimeStart(next, firstTimestamp, latestTimestampForView, windowMs));
   };
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -266,7 +264,14 @@ function clampTooltipPosition(value: number, minimum: number, maximum: number) {
   return Math.max(minimum, Math.min(value, Math.max(minimum, maximum)));
 }
 
-export const waveformInteractionHelpers = { findSharedCrosshair };
+function clampWaveTimeStart(nextStartMs: number, firstTimestampMs: number | undefined, latestTimestampMs: number | undefined, windowMs: number) {
+  const originMs = firstTimestampMs ?? 0;
+  const latestMs = latestTimestampMs ?? originMs;
+  const maximumStartMs = Math.max(originMs, latestMs - windowMs);
+  return clamp(nextStartMs, originMs, maximumStartMs);
+}
+
+export const waveformInteractionHelpers = { clampTimeStart: clampWaveTimeStart, findSharedCrosshair };
 
 function WaveToolbar({ channelCount, connected, followingLatest, openMenu, paused, onClear, onSave, onJumpToLatest, onPause, onToggleMenu }: {
   channelCount: number;

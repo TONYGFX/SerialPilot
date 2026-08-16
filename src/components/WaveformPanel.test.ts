@@ -71,3 +71,13 @@ describe("stable waveform scale", () => {
     });
   }
 });
+
+describe("waveform time bounds", () => {
+  it("does not pan left of zero before monitoring has captured a sample", () => {
+    expect(waveformInteractionHelpers.clampTimeStart(-5_000, undefined, undefined, 11_000)).toBe(0);
+  });
+
+  it("does not pan left of the monitoring origin after samples arrive", () => {
+    expect(waveformInteractionHelpers.clampTimeStart(500, 1_000, 30_000, 11_000)).toBe(1_000);
+  });
+});
