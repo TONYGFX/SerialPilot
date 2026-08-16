@@ -5,6 +5,7 @@
  */
 
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { downloadDir } from "@tauri-apps/api/path";
 import { Icon } from "./components/Icon";
 import { McpDialog } from "./components/McpDialog";
 import { ResizableDivider } from "./components/ResizableDivider";
@@ -34,6 +35,12 @@ export function App() {
 
   useEffect(() => { window.localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(preferences)); }, [preferences]);
   useEffect(() => {
+    if (preferences.receiveDirectory) return;
+    void downloadDir().then((directory) => {
+      setPreferences((current) => current.receiveDirectory ? current : { ...current, receiveDirectory: directory });
+    }).catch(() => undefined);
+  }, [preferences.receiveDirectory]);
+  useEffect(() => {
     if (!preferences.mcpHttp.enabled) return;
     void configureMcpHttp(preferences.mcpHttp).then(setMcpStatus).catch(() => undefined);
   }, []);
@@ -50,13 +57,13 @@ export function App() {
     </header>
     {serial.error && <div className="error" role="alert">{serial.error}</div>}
     <div className="workspace" style={{ "--settings-width": `${settingsWidth}px` } as CSSProperties}>
-      <SettingsPanel config={serial.config} ports={serial.ports} connected={serial.status.connected} autoReconnect={serial.autoReconnect} timedSend={serial.timedSend} timerSeconds={serial.timerSeconds} filePath={serial.filePath} fileProtocol={serial.fileProtocol} fileProgress={serial.fileProgress} onChange={serial.setConfig} onOpen={serial.open} onClose={serial.close} onRefreshPorts={serial.refreshPorts} onAutoReconnect={serial.setAutoReconnect} onTimedSend={serial.setTimedSend} onTimerSeconds={serial.setTimerSeconds} onFilePath={(path) => { serial.setFilePath(path); serial.setPayload(path); serial.setEncoding("text"); }} onFileProtocol={serial.setFileProtocol} onCancelFileSend={serial.cancelFileSend} onDismissFileSend={serial.dismissFileSend} />
+      <SettingsPanel config={serial.config} ports={serial.ports} connected={serial.status.connected} autoReconnect={serial.autoReconnect} timedSend={serial.timedSend} timerSeconds={serial.timerSeconds} filePath={serial.filePath} fileProtocol={serial.fileProtocol} fileProgress={serial.fileProgress} fileReceiveProgress={serial.fileReceiveProgress} receiveDirectory={preferences.receiveDirectory} onChange={serial.setConfig} onOpen={serial.open} onClose={serial.close} onRefreshPorts={serial.refreshPorts} onAutoReconnect={serial.setAutoReconnect} onTimedSend={serial.setTimedSend} onTimerSeconds={serial.setTimerSeconds} onFilePath={(path) => { serial.setFilePath(path); serial.setPayload(path); serial.setEncoding("text"); }} onFileProtocol={serial.setFileProtocol} onCancelFileSend={serial.cancelFileSend} onDismissFileSend={serial.dismissFileSend} onReceiveFile={serial.receiveFile} onCancelFileReceive={serial.cancelFileReceive} onDismissFileReceive={serial.dismissFileReceive} />
       <ResizableDivider orientation="vertical" value={settingsWidth} min={220} max={460} onChange={setSettingsWidth} label="调整串口配置栏宽度" />
       <div className="workspace-main">
         {view === "terminal" ? <TerminalPanel activity={activity} status={serial.status} paused={serial.paused} textCharset={preferences.textCharset} sendShortcut={preferences.keyboard.sendShortcut} encoding={serial.encoding} payload={serial.payload} canSend={canSend} onPause={serial.togglePaused} onClear={serial.clearFrames} onSave={serial.saveFrames} onEncoding={serial.setEncoding} onPayload={(value) => { serial.setPayload(value); if (value !== serial.filePath) serial.setFilePath(""); }} onSend={serial.send} /> : <WaveformPanel samples={serial.waveSamples} channels={serial.waveChannels} connected={serial.status.connected} paused={serial.waveformPaused} onPause={serial.toggleWaveformPaused} onClear={serial.clearWaveform} onChannelsChange={serial.setWaveChannels} />}
       </div>
     </div>
-    {settingsOpen && <McpDialog initialPage={settingsPage} theme={preferences.theme} textCharset={preferences.textCharset} sendShortcut={preferences.keyboard.sendShortcut} onThemeChange={(theme) => setPreferences((current) => ({ ...current, theme }))} onTextCharsetChange={(textCharset) => setPreferences((current) => ({ ...current, textCharset }))} onSendShortcutChange={(sendShortcut) => setPreferences((current) => ({ ...current, keyboard: { ...current.keyboard, sendShortcut } }))} preferences={preferences.mcpHttp} runtimeStatus={mcpStatus} onChange={(mcpHttp) => setPreferences((current) => ({ ...current, mcpHttp }))} onApply={applyMcp} onClose={() => setSettingsOpen(false)} />}
+    {settingsOpen && <McpDialog initialPage={settingsPage} theme={preferences.theme} textCharset={preferences.textCharset} sendShortcut={preferences.keyboard.sendShortcut} receiveDirectory={preferences.receiveDirectory} onThemeChange={(theme) => setPreferences((current) => ({ ...current, theme }))} onTextCharsetChange={(textCharset) => setPreferences((current) => ({ ...current, textCharset }))} onSendShortcutChange={(sendShortcut) => setPreferences((current) => ({ ...current, keyboard: { ...current.keyboard, sendShortcut } }))} onReceiveDirectoryChange={(receiveDirectory) => setPreferences((current) => ({ ...current, receiveDirectory }))} preferences={preferences.mcpHttp} runtimeStatus={mcpStatus} onChange={(mcpHttp) => setPreferences((current) => ({ ...current, mcpHttp }))} onApply={applyMcp} onClose={() => setSettingsOpen(false)} />}
   </main>;
 }
 
@@ -74,10 +81,12 @@ function readPreferences(): ApplicationPreferences {
     const port = candidate.mcpHttp?.port;
     const textCharset: TextCharset = candidate.textCharset === "gbk" || candidate.textCharset === "ascii" || candidate.textCharset === "utf-16le" || candidate.textCharset === "utf-8" ? candidate.textCharset : "utf-8";
     const sendShortcut: SendShortcut = candidate.keyboard?.sendShortcut === "enter" || candidate.keyboard?.sendShortcut === "ctrl-enter" ? candidate.keyboard.sendShortcut : "ctrl-enter";
+    const receiveDirectory = typeof candidate.receiveDirectory === "string" ? candidate.receiveDirectory : "";
     return {
       theme,
       textCharset,
       keyboard: { sendShortcut },
+      receiveDirectory,
       mcpHttp: {
         enabled: candidate.mcpHttp?.enabled === true,
         port: typeof port === "number" && Number.isInteger(port) && port >= 1024 && port <= 65535 ? port : 3030,

@@ -1,4 +1,9 @@
-use std::{collections::VecDeque, sync::Arc, time::Duration};
+use std::{
+    collections::VecDeque,
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use encoding_rs::{Encoding, GBK, UTF_16LE, UTF_8};
@@ -34,6 +39,10 @@ pub enum CoreError {
     FileSend(String),
     #[error("file send is already active")]
     FileSendBusy,
+    #[error("file receive failed: {0}")]
+    FileReceive(String),
+    #[error("file receive is already active")]
+    FileReceiveBusy,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -69,6 +78,14 @@ impl Default for FileTransferProtocol {
     fn default() -> Self {
         Self::Null
     }
+}
+
+/// Development-only control used by the Mock adapter to emulate a remote peer.
+/// Physical adapters never receive this message and only expose serial bytes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FileTransferControl {
+    Send(FileTransferProtocol),
+    Receive(FileTransferProtocol),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -267,6 +284,16 @@ pub enum SerialCommand {
     CancelSendFile {
         action_id: String,
     },
+    ReceiveFile {
+        session_id: String,
+        directory: String,
+        protocol: FileTransferProtocol,
+        timeout_ms: Option<u64>,
+        action_id: Option<String>,
+    },
+    CancelReceiveFile {
+        action_id: String,
+    },
     ReadSince {
         session_id: String,
         after_cursor: u64,
@@ -375,6 +402,14 @@ pub enum CommandResult {
         action_id: String,
         sent_bytes: u64,
     },
+    FileReceiveStarted {
+        action_id: String,
+        directory: String,
+    },
+    FileReceiveCancelled {
+        action_id: String,
+        received_bytes: u64,
+    },
     Read {
         read: BufferRead,
     },
@@ -431,6 +466,7 @@ pub enum EventKind {
     CommandFailed,
     Frame,
     FileProgress,
+    FileReceiveProgress,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -454,11 +490,27 @@ pub struct FileProgress {
     pub cancelled: bool,
 }
 
+/// Immutable progress event emitted by the Rust-owned file receiver.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileReceiveProgress {
+    pub action_id: String,
+    pub file_path: String,
+    pub file_name: String,
+    pub file_size: Option<u64>,
+    pub received_bytes: u64,
+    pub chunk_size: usize,
+    pub waiting: bool,
+    pub completed: bool,
+    pub cancelled: bool,
+    pub failed: bool,
+    pub message: Option<String>,
+}
+
 struct ActiveSession {
     id: String,
     config: SerialConfig,
     outgoing: tokio::sync::mpsc::Sender<Vec<u8>>,
-    file_transfer_control: Option<tokio::sync::mpsc::Sender<FileTransferProtocol>>,
+    file_transfer_control: Option<tokio::sync::mpsc::Sender<FileTransferControl>>,
     reader: JoinHandle<()>,
     shutdown: Option<Arc<std::sync::atomic::AtomicBool>>,
     workers: Vec<std::thread::JoinHandle<()>>,
@@ -501,6 +553,9 @@ pub struct SerialCore {
     file_send: Arc<Mutex<Option<String>>>,
     file_cancel: Arc<Mutex<Option<String>>>,
     file_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    file_receive: Arc<Mutex<Option<String>>>,
+    file_receive_cancel: Arc<Mutex<Option<String>>>,
+    file_receive_task: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
 }
 
 impl SerialCore {
@@ -515,6 +570,9 @@ impl SerialCore {
             file_send: Arc::new(Mutex::new(None)),
             file_cancel: Arc::new(Mutex::new(None)),
             file_task: Arc::new(Mutex::new(None)),
+            file_receive: Arc::new(Mutex::new(None)),
+            file_receive_cancel: Arc::new(Mutex::new(None)),
+            file_receive_task: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -554,6 +612,7 @@ impl SerialCore {
             SerialCommand::Send { action_id, .. }
             | SerialCommand::Exchange { action_id, .. }
             | SerialCommand::SendFile { action_id, .. }
+            | SerialCommand::ReceiveFile { action_id, .. }
             | SerialCommand::SendBatch { action_id, .. }
             | SerialCommand::ExchangeBatch { action_id, .. } => action_id.clone(),
             _ => None,
@@ -632,6 +691,19 @@ impl SerialCore {
                 .await
             }
             SerialCommand::CancelSendFile { action_id } => self.cancel_send_file(&action_id).await,
+            SerialCommand::ReceiveFile {
+                session_id,
+                directory,
+                protocol,
+                timeout_ms,
+                action_id,
+            } => {
+                self.receive_file(&session_id, directory, protocol, timeout_ms, action_id)
+                    .await
+            }
+            SerialCommand::CancelReceiveFile { action_id } => {
+                self.cancel_receive_file(&action_id).await
+            }
             SerialCommand::ReadSince {
                 session_id,
                 after_cursor,
@@ -1046,6 +1118,9 @@ impl SerialCore {
         if self.file_send.lock().await.is_some() {
             return Err(CoreError::FileSendBusy);
         }
+        if self.file_receive.lock().await.is_some() {
+            return Err(CoreError::FileReceiveBusy);
+        }
         let bytes = decode_payload(&encoding, text_charset, &payload)?;
         let outgoing = {
             let state = self.state.lock().await;
@@ -1101,6 +1176,9 @@ impl SerialCore {
         }
         let file_size = metadata.len();
         self.ensure_session(session_id).await?;
+        if self.file_receive.lock().await.is_some() {
+            return Err(CoreError::FileReceiveBusy);
+        }
         let outgoing = self.session_sender(session_id).await?;
         let file_transfer_control = self.file_transfer_control(session_id).await?;
         {
@@ -1200,6 +1278,92 @@ impl SerialCore {
         })
     }
 
+    async fn receive_file(
+        &self,
+        session_id: &str,
+        directory: String,
+        protocol: FileTransferProtocol,
+        timeout_ms: Option<u64>,
+        action_id: Option<String>,
+    ) -> Result<CommandResult, CoreError> {
+        if protocol == FileTransferProtocol::Null {
+            return Err(CoreError::FileReceive(
+                "Null is a raw stream and cannot receive a verified file".into(),
+            ));
+        }
+        let directory = PathBuf::from(directory.trim());
+        if directory.as_os_str().is_empty() {
+            return Err(CoreError::FileReceive("receive directory is empty".into()));
+        }
+        tokio::fs::create_dir_all(&directory)
+            .await
+            .map_err(|error| CoreError::FileReceive(error.to_string()))?;
+        self.ensure_session(session_id).await?;
+        if self.file_send.lock().await.is_some() {
+            return Err(CoreError::FileSendBusy);
+        }
+        let action_id = action_id.unwrap_or_else(|| Uuid::new_v4().to_string());
+        {
+            let mut active = self.file_receive.lock().await;
+            if active.is_some() {
+                return Err(CoreError::FileReceiveBusy);
+            }
+            *active = Some(action_id.clone());
+        }
+        *self.file_receive_cancel.lock().await = None;
+        let outgoing = self.session_sender(session_id).await?;
+        let control = self.file_transfer_control(session_id).await?;
+        let state = self.state.clone();
+        let events = self.events.clone();
+        let audit = self.audit.clone();
+        let changed = self.changed.clone();
+        let active = self.file_receive.clone();
+        let cancel = self.file_receive_cancel.clone();
+        let task_slot = self.file_receive_task.clone();
+        let action_for_task = action_id.clone();
+        let timeout_ms = timeout_ms.unwrap_or(10_000).clamp(250, 60_000);
+        let result_directory = directory.to_string_lossy().into_owned();
+        let task = tokio::spawn(async move {
+            let progress = receive_file_stream(
+                &action_for_task,
+                directory,
+                protocol,
+                timeout_ms,
+                outgoing,
+                control,
+                &state,
+                &events,
+                &audit,
+                &changed,
+                &cancel,
+            )
+            .await;
+            emit_file_receive_progress(&events, &audit, progress);
+            let _ = active.lock().await.take();
+            let _ = task_slot.lock().await.take();
+        });
+        *self.file_receive_task.lock().await = Some(task);
+        Ok(CommandResult::FileReceiveStarted {
+            action_id,
+            directory: result_directory,
+        })
+    }
+
+    async fn cancel_receive_file(&self, action_id: &str) -> Result<CommandResult, CoreError> {
+        let active = self.file_receive.lock().await.clone();
+        if active.as_deref() != Some(action_id) {
+            return Err(CoreError::FileReceive(
+                "no matching file receive is active".into(),
+            ));
+        }
+        *self.file_receive_cancel.lock().await = Some(action_id.into());
+        self.changed.notify_waiters();
+        Ok(CommandResult::FileReceiveCancelled {
+            action_id: action_id.into(),
+            received_bytes: 0,
+        })
+    }
+
     async fn session_sender(
         &self,
         session_id: &str,
@@ -1215,7 +1379,7 @@ impl SerialCore {
     async fn file_transfer_control(
         &self,
         session_id: &str,
-    ) -> Result<Option<tokio::sync::mpsc::Sender<FileTransferProtocol>>, CoreError> {
+    ) -> Result<Option<tokio::sync::mpsc::Sender<FileTransferControl>>, CoreError> {
         let state = self.state.lock().await;
         let session = state.session.as_ref().ok_or(CoreError::NotOpen)?;
         if session.id != session_id {
@@ -1386,7 +1550,7 @@ async fn stream_file(
     interval_ms: u64,
     timeout_ms: u64,
     outgoing: tokio::sync::mpsc::Sender<Vec<u8>>,
-    file_transfer_control: Option<tokio::sync::mpsc::Sender<FileTransferProtocol>>,
+    file_transfer_control: Option<tokio::sync::mpsc::Sender<FileTransferControl>>,
     state: &Arc<Mutex<State>>,
     events: &broadcast::Sender<SerialEvent>,
     audit: &Arc<std::sync::Mutex<VecDeque<SerialEvent>>>,
@@ -1402,7 +1566,9 @@ async fn stream_file(
     let cursor = state.lock().await.next_cursor.saturating_sub(1);
     if protocol != FileTransferProtocol::Null {
         if let Some(control) = file_transfer_control {
-            let _ = control.send(protocol.clone()).await;
+            let _ = control
+                .send(FileTransferControl::Send(protocol.clone()))
+                .await;
         }
         if wait_for_control(
             state,
@@ -1578,6 +1744,496 @@ async fn stream_file(
         },
     );
     Ok(sent_bytes)
+}
+
+const XMODEM_SOH: u8 = 0x01;
+const XMODEM_STX: u8 = 0x02;
+const XMODEM_EOT: u8 = 0x04;
+const XMODEM_ACK: u8 = 0x06;
+const XMODEM_NAK: u8 = 0x15;
+const XMODEM_CRC_REQUEST: u8 = 0x43;
+
+enum ReceivedPacket {
+    Data { sequence: u8, payload: Vec<u8> },
+    EndOfTransfer,
+    Invalid,
+}
+
+async fn receive_file_stream(
+    action_id: &str,
+    directory: PathBuf,
+    protocol: FileTransferProtocol,
+    timeout_ms: u64,
+    outgoing: tokio::sync::mpsc::Sender<Vec<u8>>,
+    control: Option<tokio::sync::mpsc::Sender<FileTransferControl>>,
+    state: &Arc<Mutex<State>>,
+    events: &broadcast::Sender<SerialEvent>,
+    audit: &Arc<std::sync::Mutex<VecDeque<SerialEvent>>>,
+    changed: &Arc<Notify>,
+    cancel: &Arc<Mutex<Option<String>>>,
+) -> FileReceiveProgress {
+    let cursor = state.lock().await.next_cursor.saturating_sub(1);
+    let mut progress = new_receive_progress(action_id);
+    emit_file_receive_progress(events, audit, progress.clone());
+    if let Some(control) = control {
+        let _ = control
+            .send(FileTransferControl::Receive(protocol.clone()))
+            .await;
+    }
+    if send_wire(
+        &[XMODEM_CRC_REQUEST],
+        outgoing.clone(),
+        state,
+        events,
+        audit,
+        changed,
+        timeout_ms,
+    )
+    .await
+    .is_err()
+    {
+        return receive_failed(progress, "无法发送接收握手");
+    }
+
+    let mut parser = Vec::new();
+    let mut next_cursor = cursor;
+    let mut expected_sequence: u8 = if protocol == FileTransferProtocol::Ymodem {
+        0
+    } else {
+        1
+    };
+    let mut awaiting_ymodem_end = false;
+    let mut invalid_packets = 0u8;
+    let mut target_path = None;
+    let mut part_path = None;
+    let mut file = None;
+
+    loop {
+        if cancellation_requested(cancel, action_id).await {
+            cleanup_partial_file(part_path.as_deref()).await;
+            return receive_cancelled(progress);
+        }
+        let Some((frame_cursor, bytes)) =
+            wait_for_rx_bytes(state, changed, cancel, action_id, next_cursor, timeout_ms).await
+        else {
+            cleanup_partial_file(part_path.as_deref()).await;
+            return receive_failed(progress, "等待发送端数据超时");
+        };
+        next_cursor = frame_cursor;
+        parser.extend(bytes);
+        while let Some(packet) = take_received_packet(&mut parser) {
+            match packet {
+                ReceivedPacket::Invalid => {
+                    invalid_packets += 1;
+                    if send_receive_control(
+                        XMODEM_NAK, &outgoing, state, events, audit, changed, timeout_ms,
+                    )
+                    .await
+                    .is_err()
+                    {
+                        cleanup_partial_file(part_path.as_deref()).await;
+                        return receive_failed(progress, "无法请求重传");
+                    }
+                    if invalid_packets >= 10 {
+                        cleanup_partial_file(part_path.as_deref()).await;
+                        return receive_failed(progress, "连续 CRC 或序号校验失败");
+                    }
+                }
+                ReceivedPacket::EndOfTransfer => {
+                    if send_receive_control(
+                        XMODEM_ACK, &outgoing, state, events, audit, changed, timeout_ms,
+                    )
+                    .await
+                    .is_err()
+                    {
+                        cleanup_partial_file(part_path.as_deref()).await;
+                        return receive_failed(progress, "无法确认传输结束");
+                    }
+                    if protocol != FileTransferProtocol::Ymodem {
+                        return finalize_received_file(progress, file, part_path, target_path)
+                            .await;
+                    }
+                    if send_receive_control(
+                        XMODEM_CRC_REQUEST,
+                        &outgoing,
+                        state,
+                        events,
+                        audit,
+                        changed,
+                        timeout_ms,
+                    )
+                    .await
+                    .is_err()
+                    {
+                        cleanup_partial_file(part_path.as_deref()).await;
+                        return receive_failed(progress, "无法请求 Ymodem 结束包");
+                    }
+                    awaiting_ymodem_end = true;
+                    expected_sequence = 0;
+                }
+                ReceivedPacket::Data { sequence, payload } => {
+                    if sequence == expected_sequence.wrapping_sub(1) {
+                        let _ = send_receive_control(
+                            XMODEM_ACK, &outgoing, state, events, audit, changed, timeout_ms,
+                        )
+                        .await;
+                        continue;
+                    }
+                    if sequence != expected_sequence {
+                        invalid_packets += 1;
+                        let _ = send_receive_control(
+                            XMODEM_NAK, &outgoing, state, events, audit, changed, timeout_ms,
+                        )
+                        .await;
+                        continue;
+                    }
+                    invalid_packets = 0;
+                    if protocol == FileTransferProtocol::Ymodem
+                        && !awaiting_ymodem_end
+                        && expected_sequence == 0
+                    {
+                        let Some((file_name, file_size)) = parse_ymodem_header(&payload) else {
+                            cleanup_partial_file(part_path.as_deref()).await;
+                            return receive_failed(progress, "Ymodem 文件头无效");
+                        };
+                        match create_receive_file(&directory, &file_name).await {
+                            Ok((target, part, output)) => {
+                                progress.file_path = target.to_string_lossy().into_owned();
+                                progress.file_name = file_name;
+                                progress.file_size = Some(file_size);
+                                progress.waiting = false;
+                                target_path = Some(target);
+                                part_path = Some(part);
+                                file = Some(output);
+                            }
+                            Err(error) => return receive_failed(progress, &error),
+                        }
+                        if send_receive_control(
+                            XMODEM_ACK, &outgoing, state, events, audit, changed, timeout_ms,
+                        )
+                        .await
+                        .is_err()
+                            || send_receive_control(
+                                XMODEM_CRC_REQUEST,
+                                &outgoing,
+                                state,
+                                events,
+                                audit,
+                                changed,
+                                timeout_ms,
+                            )
+                            .await
+                            .is_err()
+                        {
+                            cleanup_partial_file(part_path.as_deref()).await;
+                            return receive_failed(progress, "无法确认 Ymodem 文件头");
+                        }
+                        expected_sequence = 1;
+                        emit_file_receive_progress(events, audit, progress.clone());
+                        continue;
+                    }
+                    if awaiting_ymodem_end {
+                        if payload.iter().any(|byte| *byte != 0) {
+                            cleanup_partial_file(part_path.as_deref()).await;
+                            return receive_failed(progress, "Ymodem 结束包无效");
+                        }
+                        if send_receive_control(
+                            XMODEM_ACK, &outgoing, state, events, audit, changed, timeout_ms,
+                        )
+                        .await
+                        .is_err()
+                        {
+                            cleanup_partial_file(part_path.as_deref()).await;
+                            return receive_failed(progress, "无法确认 Ymodem 结束包");
+                        }
+                        return finalize_received_file(progress, file, part_path, target_path)
+                            .await;
+                    }
+                    if file.is_none() {
+                        let generated_name = generated_receive_name();
+                        match create_receive_file(&directory, &generated_name).await {
+                            Ok((target, part, output)) => {
+                                progress.file_path = target.to_string_lossy().into_owned();
+                                progress.file_name = generated_name;
+                                progress.waiting = false;
+                                target_path = Some(target);
+                                part_path = Some(part);
+                                file = Some(output);
+                            }
+                            Err(error) => return receive_failed(progress, &error),
+                        }
+                    }
+                    let write_length = received_write_length(&progress, payload.len());
+                    if let Some(output) = file.as_mut() {
+                        if tokio::io::AsyncWriteExt::write_all(output, &payload[..write_length])
+                            .await
+                            .is_err()
+                        {
+                            cleanup_partial_file(part_path.as_deref()).await;
+                            return receive_failed(progress, "写入接收文件失败");
+                        }
+                    }
+                    progress.received_bytes += write_length as u64;
+                    progress.chunk_size = payload.len();
+                    if send_receive_control(
+                        XMODEM_ACK, &outgoing, state, events, audit, changed, timeout_ms,
+                    )
+                    .await
+                    .is_err()
+                    {
+                        cleanup_partial_file(part_path.as_deref()).await;
+                        return receive_failed(progress, "无法确认接收数据包");
+                    }
+                    expected_sequence = expected_sequence.wrapping_add(1);
+                    emit_file_receive_progress(events, audit, progress.clone());
+                }
+            }
+        }
+    }
+}
+
+fn new_receive_progress(action_id: &str) -> FileReceiveProgress {
+    FileReceiveProgress {
+        action_id: action_id.into(),
+        file_path: String::new(),
+        file_name: String::new(),
+        file_size: None,
+        received_bytes: 0,
+        chunk_size: 0,
+        waiting: true,
+        completed: false,
+        cancelled: false,
+        failed: false,
+        message: None,
+    }
+}
+
+fn receive_failed(mut progress: FileReceiveProgress, message: &str) -> FileReceiveProgress {
+    progress.waiting = false;
+    progress.failed = true;
+    progress.message = Some(message.into());
+    progress
+}
+
+fn receive_cancelled(mut progress: FileReceiveProgress) -> FileReceiveProgress {
+    progress.waiting = false;
+    progress.cancelled = true;
+    progress
+}
+
+async fn finalize_received_file(
+    mut progress: FileReceiveProgress,
+    mut file: Option<tokio::fs::File>,
+    part_path: Option<PathBuf>,
+    target_path: Option<PathBuf>,
+) -> FileReceiveProgress {
+    let (Some(output), Some(part), Some(target)) = (file.as_mut(), part_path, target_path) else {
+        return receive_failed(progress, "未收到文件数据");
+    };
+    if tokio::io::AsyncWriteExt::flush(output).await.is_err() || output.sync_all().await.is_err() {
+        cleanup_partial_file(Some(&part)).await;
+        return receive_failed(progress, "写入接收文件失败");
+    }
+    drop(file);
+    if tokio::fs::rename(&part, &target).await.is_err() {
+        cleanup_partial_file(Some(&part)).await;
+        return receive_failed(progress, "无法完成接收文件保存");
+    }
+    progress.waiting = false;
+    progress.completed = true;
+    progress
+}
+
+fn received_write_length(progress: &FileReceiveProgress, payload_length: usize) -> usize {
+    progress
+        .file_size
+        .map(|size| {
+            size.saturating_sub(progress.received_bytes)
+                .min(payload_length as u64) as usize
+        })
+        .unwrap_or(payload_length)
+}
+
+async fn create_receive_file(
+    directory: &Path,
+    file_name: &str,
+) -> Result<(PathBuf, PathBuf, tokio::fs::File), String> {
+    let target = available_receive_path(directory, file_name).await?;
+    let part = target.with_extension(format!(
+        "{}.serialpilot.part",
+        target
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or("bin")
+    ));
+    let file = tokio::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&part)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok((target, part, file))
+}
+
+async fn available_receive_path(directory: &Path, file_name: &str) -> Result<PathBuf, String> {
+    let file_name = safe_receive_name(file_name);
+    let candidate = directory.join(&file_name);
+    if tokio::fs::try_exists(&candidate)
+        .await
+        .map_err(|error| error.to_string())?
+        == false
+    {
+        return Ok(candidate);
+    }
+    let source = Path::new(&file_name);
+    let stem = source
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("receive");
+    let extension = source
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("bin");
+    for index in 1..10_000 {
+        let candidate = directory.join(format!("{stem} ({index}).{extension}"));
+        if !tokio::fs::try_exists(&candidate)
+            .await
+            .map_err(|error| error.to_string())?
+        {
+            return Ok(candidate);
+        }
+    }
+    Err("无法生成可用的接收文件名".into())
+}
+
+fn safe_receive_name(file_name: &str) -> String {
+    let leaf = Path::new(file_name)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("receive.bin");
+    let safe = leaf
+        .chars()
+        .map(|character| {
+            if "<>:\"/\\|?*".contains(character) || character.is_control() {
+                '_'
+            } else {
+                character
+            }
+        })
+        .collect::<String>();
+    if safe.trim_matches('.').is_empty() {
+        "receive.bin".into()
+    } else {
+        safe
+    }
+}
+
+fn generated_receive_name() -> String {
+    let seconds = now_ms() / 1_000;
+    format!("receive_{seconds}.bin")
+}
+
+fn parse_ymodem_header(payload: &[u8]) -> Option<(String, u64)> {
+    let mut values = payload.split(|byte| *byte == 0);
+    let file_name = String::from_utf8_lossy(values.next()?).trim().to_owned();
+    let file_size = String::from_utf8_lossy(values.next()?)
+        .trim()
+        .parse()
+        .ok()?;
+    (!file_name.is_empty()).then_some((safe_receive_name(&file_name), file_size))
+}
+
+fn take_received_packet(buffer: &mut Vec<u8>) -> Option<ReceivedPacket> {
+    let marker_index = buffer
+        .iter()
+        .position(|byte| matches!(*byte, XMODEM_SOH | XMODEM_STX | XMODEM_EOT))?;
+    buffer.drain(..marker_index);
+    if buffer.first() == Some(&XMODEM_EOT) {
+        buffer.remove(0);
+        return Some(ReceivedPacket::EndOfTransfer);
+    }
+    let payload_size = if buffer.first() == Some(&XMODEM_STX) {
+        1024
+    } else {
+        128
+    };
+    let packet_size = payload_size + 5;
+    if buffer.len() < packet_size {
+        return None;
+    }
+    let packet: Vec<_> = buffer.drain(..packet_size).collect();
+    let sequence = packet[1];
+    let valid_sequence = packet[2] == 255 - sequence;
+    let expected_crc = u16::from_be_bytes([packet[packet_size - 2], packet[packet_size - 1]]);
+    let payload = packet[3..packet_size - 2].to_vec();
+    if !valid_sequence || crc16(&payload) != expected_crc {
+        return Some(ReceivedPacket::Invalid);
+    }
+    Some(ReceivedPacket::Data { sequence, payload })
+}
+
+async fn wait_for_rx_bytes(
+    state: &Arc<Mutex<State>>,
+    changed: &Arc<Notify>,
+    cancel: &Arc<Mutex<Option<String>>>,
+    action_id: &str,
+    after_cursor: u64,
+    timeout_ms: u64,
+) -> Option<(u64, Vec<u8>)> {
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
+    let mut cursor = after_cursor;
+    loop {
+        if cancellation_requested(cancel, action_id).await {
+            return None;
+        }
+        let notified = changed.notified();
+        tokio::pin!(notified);
+        let frame = state
+            .lock()
+            .await
+            .frames
+            .iter()
+            .find(|frame| frame.cursor > cursor && frame.direction == Direction::Rx)
+            .cloned();
+        if let Some(frame) = frame {
+            cursor = frame.cursor;
+            if let Ok(bytes) = BASE64.decode(frame.raw_base64) {
+                return Some((cursor, bytes));
+            }
+            continue;
+        }
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() || timeout(remaining, &mut notified).await.is_err() {
+            return None;
+        }
+    }
+}
+
+async fn send_receive_control(
+    value: u8,
+    outgoing: &tokio::sync::mpsc::Sender<Vec<u8>>,
+    state: &Arc<Mutex<State>>,
+    events: &broadcast::Sender<SerialEvent>,
+    audit: &Arc<std::sync::Mutex<VecDeque<SerialEvent>>>,
+    changed: &Arc<Notify>,
+    timeout_ms: u64,
+) -> Result<(), (u64, bool)> {
+    send_wire(
+        &[value],
+        outgoing.clone(),
+        state,
+        events,
+        audit,
+        changed,
+        timeout_ms,
+    )
+    .await
+}
+
+async fn cleanup_partial_file(path: Option<&Path>) {
+    if let Some(path) = path {
+        let _ = tokio::fs::remove_file(path).await;
+    }
 }
 
 async fn send_wire(
@@ -1839,6 +2495,25 @@ fn frame_event(frame: Frame) -> SerialEvent {
         detail: serde_json::to_value(frame).unwrap_or_default(),
     }
 }
+
+fn emit_file_receive_progress(
+    events: &broadcast::Sender<SerialEvent>,
+    audit: &Arc<std::sync::Mutex<VecDeque<SerialEvent>>>,
+    progress: FileReceiveProgress,
+) {
+    record_event(
+        events,
+        audit,
+        SerialEvent {
+            event_id: Uuid::new_v4().to_string(),
+            timestamp_ms: now_ms(),
+            kind: EventKind::FileReceiveProgress,
+            action: "serial.receive_file".into(),
+            action_id: Some(progress.action_id.clone()),
+            detail: serde_json::to_value(progress).unwrap_or_default(),
+        },
+    );
+}
 fn record_event(
     events: &broadcast::Sender<SerialEvent>,
     audit: &std::sync::Mutex<VecDeque<SerialEvent>>,
@@ -1862,6 +2537,8 @@ fn command_name(command: &SerialCommand) -> &'static str {
         SerialCommand::Send { .. } => "serial.send",
         SerialCommand::SendFile { .. } => "serial.send_file",
         SerialCommand::CancelSendFile { .. } => "serial.cancel_send_file",
+        SerialCommand::ReceiveFile { .. } => "serial.receive_file",
+        SerialCommand::CancelReceiveFile { .. } => "serial.cancel_receive_file",
         SerialCommand::ReadSince { .. } => "serial.read_since",
         SerialCommand::WaitFor { .. } => "serial.wait_for",
         SerialCommand::Exchange { .. } => "serial.exchange",
@@ -2248,6 +2925,45 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn mock_receives_xmodem_and_ymodem_files() {
+        for protocol in [
+            FileTransferProtocol::Xmodem,
+            FileTransferProtocol::Xmodem1k,
+            FileTransferProtocol::Ymodem,
+        ] {
+            let core = core();
+            let (session, _) = open(&core).await;
+            let directory = std::env::temp_dir().join(format!(
+                "serialpilot-receive-{}-{}",
+                file_transfer_protocol_label(&protocol),
+                now_ms()
+            ));
+            let action_id = format!("receive-{}", file_transfer_protocol_label(&protocol));
+            let mut events = core.subscribe();
+            core.execute(SerialCommand::ReceiveFile {
+                session_id: session,
+                directory: directory.to_string_lossy().into_owned(),
+                protocol: protocol.clone(),
+                timeout_ms: Some(500),
+                action_id: Some(action_id.clone()),
+            })
+            .await
+            .unwrap();
+
+            let progress = wait_for_file_receive_completion(&mut events, &action_id).await;
+            assert!(progress.completed, "{protocol:?} should complete");
+            assert!(!progress.file_path.is_empty());
+            let received = tokio::fs::read(&progress.file_path).await.unwrap();
+            assert!(received.starts_with(b"SerialPilot mock receive file\r\n"));
+            if protocol == FileTransferProtocol::Ymodem {
+                assert_eq!(progress.file_name, "mock-receive.txt");
+                assert_eq!(received, b"SerialPilot mock receive file\r\n");
+            }
+            tokio::fs::remove_dir_all(directory).await.unwrap();
+        }
+    }
+
     async fn wait_for_file_completion(
         events: &mut broadcast::Receiver<SerialEvent>,
         action_id: &str,
@@ -2267,6 +2983,29 @@ mod tests {
         })
         .await
         .expect("mock file transfer should finish")
+    }
+
+    async fn wait_for_file_receive_completion(
+        events: &mut broadcast::Receiver<SerialEvent>,
+        action_id: &str,
+    ) -> FileReceiveProgress {
+        timeout(Duration::from_secs(3), async {
+            loop {
+                let event = events.recv().await.expect("file receive progress event");
+                if !matches!(event.kind, EventKind::FileReceiveProgress) {
+                    continue;
+                }
+                let progress = serde_json::from_value::<FileReceiveProgress>(event.detail)
+                    .expect("valid file receive progress payload");
+                if progress.action_id == action_id
+                    && (progress.completed || progress.cancelled || progress.failed)
+                {
+                    return progress;
+                }
+            }
+        })
+        .await
+        .expect("mock file receive should finish")
     }
 
     fn file_transfer_protocol_label(protocol: &FileTransferProtocol) -> &'static str {

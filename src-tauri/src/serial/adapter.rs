@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use std::sync::{atomic::AtomicBool, Arc};
 use tokio::sync::mpsc;
 
-use crate::command::{CoreError, FileTransferProtocol, PortInfo, SerialConfig};
+use crate::command::{CoreError, FileTransferControl, PortInfo, SerialConfig};
 
 /// This boundary is the sole route to a physical serial implementation.
 pub struct AdapterConnection {
@@ -10,7 +10,7 @@ pub struct AdapterConnection {
     pub outgoing: mpsc::Sender<Vec<u8>>,
     /// Development adapters can receive this notification to emulate a device
     /// handshake. Physical adapters leave it unset and never see this hook.
-    pub file_transfer_control: Option<mpsc::Sender<FileTransferProtocol>>,
+    pub file_transfer_control: Option<mpsc::Sender<FileTransferControl>>,
     pub shutdown: Option<Arc<AtomicBool>>,
     pub workers: Vec<std::thread::JoinHandle<()>>,
 }

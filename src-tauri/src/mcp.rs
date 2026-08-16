@@ -55,6 +55,8 @@ pub fn tool_command(name: &str, arguments: Value) -> Result<SerialCommand, Strin
         "serial.send" => decode_tagged("send", arguments),
         "serial.send_file" => decode_file_send(arguments),
         "serial.cancel_send_file" => decode_tagged("cancel_send_file", arguments),
+        "serial.receive_file" => decode_file_receive(arguments),
+        "serial.cancel_receive_file" => decode_tagged("cancel_receive_file", arguments),
         "serial.read_since" => decode_tagged("read_since", arguments),
         "serial.wait_for" => decode_tagged("wait_for", arguments),
         "serial.exchange" => decode_tagged("exchange", arguments),
@@ -109,6 +111,17 @@ fn decode_file_send(arguments: Value) -> Result<SerialCommand, String> {
     object.entry("chunk_size").or_insert_with(|| json!(256));
     object.entry("interval_ms").or_insert_with(|| json!(10));
     object.insert("type".into(), Value::String("send_file".into()));
+    serde_json::from_value(Value::Object(object)).map_err(|error| error.to_string())
+}
+
+fn decode_file_receive(arguments: Value) -> Result<SerialCommand, String> {
+    let mut object = arguments
+        .as_object()
+        .cloned()
+        .ok_or("tool arguments must be an object")?;
+    object.entry("protocol").or_insert_with(|| json!("ymodem"));
+    object.entry("timeout_ms").or_insert_with(|| json!(10_000));
+    object.insert("type".into(), Value::String("receive_file".into()));
     serde_json::from_value(Value::Object(object)).map_err(|error| error.to_string())
 }
 
@@ -276,6 +289,25 @@ pub fn tools() -> Vec<Value> {
         tool(
             "serial.cancel_send_file",
             "Cancel an active file transfer.",
+            object_schema(vec![("action_id", string_schema())], vec!["action_id"]),
+        ),
+        tool(
+            "serial.receive_file",
+            "Receive one Xmodem, Xmodem-1k, or Ymodem file into a local directory.",
+            object_schema(
+                vec![
+                    ("session_id", string_schema()),
+                    ("directory", string_schema()),
+                    ("protocol", string_enum(&["xmodem", "xmodem-1k", "ymodem"])),
+                    ("timeout_ms", integer_schema()),
+                    ("action_id", string_schema()),
+                ],
+                vec!["session_id", "directory"],
+            ),
+        ),
+        tool(
+            "serial.cancel_receive_file",
+            "Cancel an active file receive operation.",
             object_schema(vec![("action_id", string_schema())], vec!["action_id"]),
         ),
         tool(
@@ -561,7 +593,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(names.contains(&"serial.close".to_owned()));
         assert!(names.contains(&"serial.configure".to_owned()));
-        assert_eq!(names.len(), 21);
+        assert_eq!(names.len(), 23);
     }
 
     #[test]
@@ -599,6 +631,23 @@ mod tests {
             }
             _ => panic!("unexpected command"),
         }
+    }
+
+    #[test]
+    fn file_receive_defaults_to_ymodem() {
+        let command = tool_command(
+            "serial.receive_file",
+            json!({ "session_id": "s", "directory": "C:/Downloads" }),
+        )
+        .unwrap();
+        assert!(matches!(
+            command,
+            SerialCommand::ReceiveFile {
+                protocol: FileTransferProtocol::Ymodem,
+                timeout_ms: Some(10_000),
+                ..
+            }
+        ));
     }
 
     #[test]

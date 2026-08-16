@@ -30,6 +30,7 @@ export type ApplicationPreferences = {
   theme: Theme;
   textCharset: TextCharset;
   keyboard: KeyboardPreferences;
+  receiveDirectory: string;
   mcpHttp: McpHttpPreferences;
 };
 
@@ -37,5 +38,6 @@ export const DEFAULT_APPLICATION_PREFERENCES: ApplicationPreferences = {
   theme: "system",
   textCharset: "utf-8",
   keyboard: { sendShortcut: "ctrl-enter" },
+  receiveDirectory: "",
   mcpHttp: { enabled: false, port: 3030 },
 };

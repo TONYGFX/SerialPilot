@@ -31,7 +31,7 @@ export type SerialFrame = {
 export type SerialEvent = {
   event_id: string;
   timestamp_ms: number;
-  kind: "command_started" | "command_completed" | "command_failed" | "frame" | "file_progress";
+  kind: "command_started" | "command_completed" | "command_failed" | "frame" | "file_progress" | "file_receive_progress";
   action: string;
   action_id?: string | null;
   detail: unknown;
@@ -46,6 +46,21 @@ export type FileSendProgress = {
   chunk_size: number;
   completed: boolean;
   cancelled: boolean;
+};
+
+/** Progress emitted by the Rust-owned X/Ymodem file receiver. */
+export type FileReceiveProgress = {
+  action_id: string;
+  file_path: string;
+  file_name: string;
+  file_size?: number | null;
+  received_bytes: number;
+  chunk_size: number;
+  waiting: boolean;
+  completed: boolean;
+  cancelled: boolean;
+  failed: boolean;
+  message?: string | null;
 };
 
 export type FileTransferProtocol = "null" | "xmodem" | "xmodem-1k" | "ymodem";

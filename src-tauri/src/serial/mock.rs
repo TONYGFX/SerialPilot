@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 
 use crate::{
-    command::{CoreError, FileTransferProtocol, PortInfo, SerialConfig},
+    command::{CoreError, FileTransferControl, FileTransferProtocol, PortInfo, SerialConfig},
     serial::{AdapterConnection, SerialAdapter},
 };
 
@@ -67,6 +67,9 @@ impl SerialAdapter for MockSerialAdapter {
             let mut ymodem_header_seen = false;
             while let Some(payload) = writes.recv().await {
                 tokio::time::sleep(Duration::from_millis(8)).await;
+                if matches!(payload.as_slice(), [0x06 | 0x15 | 0x18 | 0x43]) {
+                    continue;
+                }
                 let is_packet = matches!(payload.first(), Some(0x01 | 0x02));
                 let is_ymodem_header = is_packet && payload.get(1) == Some(&0);
                 let mut response = if is_packet || payload == [0x04] {
@@ -91,15 +94,24 @@ impl SerialAdapter for MockSerialAdapter {
             }
         });
         tokio::spawn(async move {
-            while let Some(protocol) = transfer_requests.recv().await {
-                if protocol == FileTransferProtocol::Null {
-                    continue;
-                }
-                // The core records its receive cursor before sending this request,
-                // so this CRC handshake is always visible to X/Ymodem waiters.
-                tokio::time::sleep(Duration::from_millis(4)).await;
-                if transfer_tx.send(vec![0x43]).await.is_err() {
-                    break;
+            while let Some(request) = transfer_requests.recv().await {
+                match request {
+                    FileTransferControl::Send(protocol) => {
+                        if protocol == FileTransferProtocol::Null {
+                            continue;
+                        }
+                        // The core records its receive cursor before this request,
+                        // so the CRC handshake is visible to X/Ymodem senders.
+                        tokio::time::sleep(Duration::from_millis(4)).await;
+                        if transfer_tx.send(vec![0x43]).await.is_err() {
+                            break;
+                        }
+                    }
+                    FileTransferControl::Receive(protocol) => {
+                        if send_mock_file(&transfer_tx, protocol).await.is_err() {
+                            break;
+                        }
+                    }
                 }
             }
         });
@@ -135,4 +147,68 @@ impl SerialAdapter for MockSerialAdapter {
             workers: Vec::new(),
         })
     }
+}
+
+async fn send_mock_file(
+    incoming: &mpsc::Sender<Vec<u8>>,
+    protocol: FileTransferProtocol,
+) -> Result<(), ()> {
+    let payload = b"SerialPilot mock receive file\r\n";
+    tokio::time::sleep(Duration::from_millis(12)).await;
+    if protocol == FileTransferProtocol::Ymodem {
+        let mut header = vec![0u8; 128];
+        let metadata = format!("mock-receive.txt\0{}\0", payload.len());
+        header[..metadata.len()].copy_from_slice(metadata.as_bytes());
+        send_mock_packet(incoming, xmodem_frame(0, &header, false)).await?;
+    }
+    let large = matches!(
+        protocol,
+        FileTransferProtocol::Xmodem1k | FileTransferProtocol::Ymodem
+    );
+    send_mock_packet(incoming, xmodem_frame(1, payload, large)).await?;
+    tokio::time::sleep(Duration::from_millis(8)).await;
+    incoming.send(vec![0x04]).await.map_err(|_| ())?;
+    if protocol == FileTransferProtocol::Ymodem {
+        tokio::time::sleep(Duration::from_millis(8)).await;
+        incoming
+            .send(xmodem_frame(0, &[0; 128], false))
+            .await
+            .map_err(|_| ())?;
+    }
+    Ok(())
+}
+
+async fn send_mock_packet(incoming: &mpsc::Sender<Vec<u8>>, packet: Vec<u8>) -> Result<(), ()> {
+    incoming.send(packet).await.map_err(|_| ())?;
+    tokio::time::sleep(Duration::from_millis(8)).await;
+    Ok(())
+}
+
+fn xmodem_frame(sequence: u8, payload: &[u8], large: bool) -> Vec<u8> {
+    let (marker, size) = if large { (0x02, 1024) } else { (0x01, 128) };
+    let mut frame = vec![marker, sequence, 255 - sequence];
+    frame.extend(
+        payload
+            .iter()
+            .copied()
+            .chain(std::iter::repeat(0x1a))
+            .take(size),
+    );
+    let crc = crc16(&frame[3..]);
+    frame.extend([(crc >> 8) as u8, crc as u8]);
+    frame
+}
+
+fn crc16(bytes: &[u8]) -> u16 {
+    bytes.iter().fold(0u16, |mut crc, byte| {
+        crc ^= (*byte as u16) << 8;
+        for _ in 0..8 {
+            crc = if crc & 0x8000 != 0 {
+                (crc << 1) ^ 0x1021
+            } else {
+                crc << 1
+            };
+        }
+        crc
+    })
 }
