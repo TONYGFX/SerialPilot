@@ -4,20 +4,23 @@
  * useSerialSession and visual controls remain in dedicated components.
  */
 
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { downloadDir } from "@tauri-apps/api/path";
+import { APP_VERSION } from "./appInfo";
 import { Icon } from "./components/Icon";
-import { McpDialog } from "./components/McpDialog";
+import { McpDialog, type SettingsPage } from "./components/McpDialog";
 import { ResizableDivider } from "./components/ResizableDivider";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { TerminalPanel } from "./components/TerminalPanel";
 import { WaveformPanel } from "./components/WaveformPanel";
 import { useSerialSession } from "./hooks/useSerialSession";
 import { configureMcpHttp } from "./services/serialClient";
+import { checkForUpdate, type UpdateCheckStatus } from "./services/updateChecker";
 import { DEFAULT_APPLICATION_PREFERENCES, type ApplicationPreferences, type McpHttpStatus, type SendShortcut, type TextCharset, type Theme } from "./types/settings";
 
 type WorkspaceView = "terminal" | "waveform";
 const PREFERENCES_STORAGE_KEY = "serialpilot-preferences";
+const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 /** Renders SerialPilot's desktop workbench. */
 export function App() {
@@ -25,8 +28,9 @@ export function App() {
   const [settingsWidth, setSettingsWidth] = useState(260);
   const [preferences, setPreferences] = useState<ApplicationPreferences>(readPreferences);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsPage, setSettingsPage] = useState<"general" | "mcp">("general");
+  const [settingsPage, setSettingsPage] = useState<SettingsPage>("general");
   const [mcpStatus, setMcpStatus] = useState<McpHttpStatus>({ enabled: false });
+  const [updateStatus, setUpdateStatus] = useState<UpdateCheckStatus>({ state: "idle" });
   const resolvedTheme = useResolvedTheme(preferences.theme);
   const serial = useSerialSession(preferences.textCharset);
   const activity = useMemo(() => serial.frames.map((frame) => ({ ...frame, local: new Date(frame.timestamp_ms).toLocaleTimeString() })), [serial.frames]);
@@ -40,6 +44,22 @@ export function App() {
       setPreferences((current) => current.receiveDirectory ? current : { ...current, receiveDirectory: directory });
     }).catch(() => undefined);
   }, [preferences.receiveDirectory]);
+  const checkAppUpdate = useCallback(async () => {
+    setUpdateStatus({ state: "checking" });
+    try {
+      const result = await checkForUpdate(APP_VERSION);
+      setUpdateStatus(result.available ? { state: "available", release: result.release } : { state: "up-to-date", release: result.release });
+      const checkedAt = new Date().toISOString();
+      setPreferences((current) => ({ ...current, updates: { ...current.updates, lastCheckedAt: checkedAt } }));
+    } catch {
+      setUpdateStatus({ state: "failed" });
+    }
+  }, []);
+  useEffect(() => {
+    if (!preferences.updates.autoCheck || !shouldCheckForUpdate(preferences.updates.lastCheckedAt)) return;
+    const timer = window.setTimeout(() => void checkAppUpdate(), 1800);
+    return () => window.clearTimeout(timer);
+  }, [checkAppUpdate, preferences.updates.autoCheck, preferences.updates.lastCheckedAt]);
   useEffect(() => {
     if (!preferences.mcpHttp.enabled) return;
     void configureMcpHttp(preferences.mcpHttp).then(setMcpStatus).catch(() => undefined);
@@ -53,7 +73,7 @@ export function App() {
     <header>
       <div><p className="eyebrow">AI SERIAL CONSOLE</p><h1>SerialPilot</h1></div>
       <nav className="view-tabs" aria-label="工作区视图"><button type="button" className={view === "terminal" ? "selected" : ""} aria-selected={view === "terminal"} onClick={() => setView("terminal")}>终端</button><button type="button" className={view === "waveform" ? "selected" : ""} aria-selected={view === "waveform"} onClick={() => setView("waveform")}>波形</button></nav>
-      <div className="header-status"><button type="button" className={`mcp-status ${mcpStatus.enabled ? "online" : "offline"}`} title={mcpStatus.enabled ? "MCP 服务运行中，打开 MCP 设置" : "MCP 服务未运行，打开 MCP 设置"} aria-label="打开 MCP 设置" onClick={() => { setSettingsPage("mcp"); setSettingsOpen(true); }}><i />MCP</button><div className={`connection ${serial.status.connected ? "online" : "offline"}`}><i />{sessionLabel}</div><button type="button" className="settings-button" title="打开应用设置" aria-label="打开应用设置" onClick={() => { setSettingsPage("general"); setSettingsOpen(true); }}><Icon name="settings" /></button></div>
+      <div className="header-status"><button type="button" className={`mcp-status ${mcpStatus.enabled ? "online" : "offline"}`} title={mcpStatus.enabled ? "MCP 服务运行中，打开 MCP 设置" : "MCP 服务未运行，打开 MCP 设置"} aria-label="打开 MCP 设置" onClick={() => { setSettingsPage("mcp"); setSettingsOpen(true); }}><i />MCP</button><div className={`connection ${serial.status.connected ? "online" : "offline"}`}><i />{sessionLabel}</div><button type="button" className={`settings-button ${updateStatus.state === "available" ? "update-available" : ""}`} title={updateStatus.state === "available" ? `发现 v${updateStatus.release.version}，打开更新设置` : "打开应用设置"} aria-label="打开应用设置" onClick={() => { setSettingsPage(updateStatus.state === "available" ? "about" : "general"); setSettingsOpen(true); }}><Icon name="settings" /></button></div>
     </header>
     {serial.error && <div className="error" role="alert">{serial.error}</div>}
     <div className="workspace" style={{ "--settings-width": `${settingsWidth}px` } as CSSProperties}>
@@ -63,7 +83,7 @@ export function App() {
         {view === "terminal" ? <TerminalPanel activity={activity} status={serial.status} paused={serial.paused} textCharset={preferences.textCharset} sendShortcut={preferences.keyboard.sendShortcut} encoding={serial.encoding} payload={serial.payload} canSend={canSend} fileTransferActive={serial.fileTransferActive} onPause={serial.togglePaused} onClear={serial.clearFrames} onSave={serial.saveFrames} onEncoding={serial.setEncoding} onPayload={(value) => { serial.setPayload(value); if (value !== serial.filePath) serial.setFilePath(""); }} onSend={serial.send} /> : <WaveformPanel samples={serial.waveSamples} channels={serial.waveChannels} connected={serial.status.connected} paused={serial.waveformPaused} onPause={serial.toggleWaveformPaused} onClear={serial.clearWaveform} onChannelsChange={serial.setWaveChannels} />}
       </div>
     </div>
-    {settingsOpen && <McpDialog initialPage={settingsPage} theme={preferences.theme} textCharset={preferences.textCharset} sendShortcut={preferences.keyboard.sendShortcut} receiveDirectory={preferences.receiveDirectory} onThemeChange={(theme) => setPreferences((current) => ({ ...current, theme }))} onTextCharsetChange={(textCharset) => setPreferences((current) => ({ ...current, textCharset }))} onSendShortcutChange={(sendShortcut) => setPreferences((current) => ({ ...current, keyboard: { ...current.keyboard, sendShortcut } }))} onReceiveDirectoryChange={(receiveDirectory) => setPreferences((current) => ({ ...current, receiveDirectory }))} preferences={preferences.mcpHttp} runtimeStatus={mcpStatus} onChange={(mcpHttp) => setPreferences((current) => ({ ...current, mcpHttp }))} onApply={applyMcp} onClose={() => setSettingsOpen(false)} />}
+    {settingsOpen && <McpDialog initialPage={settingsPage} theme={preferences.theme} textCharset={preferences.textCharset} sendShortcut={preferences.keyboard.sendShortcut} receiveDirectory={preferences.receiveDirectory} autoUpdateCheck={preferences.updates.autoCheck} updateStatus={updateStatus} onThemeChange={(theme) => setPreferences((current) => ({ ...current, theme }))} onTextCharsetChange={(textCharset) => setPreferences((current) => ({ ...current, textCharset }))} onSendShortcutChange={(sendShortcut) => setPreferences((current) => ({ ...current, keyboard: { ...current.keyboard, sendShortcut } }))} onReceiveDirectoryChange={(receiveDirectory) => setPreferences((current) => ({ ...current, receiveDirectory }))} onAutoUpdateCheckChange={(autoCheck) => setPreferences((current) => ({ ...current, updates: { ...current.updates, autoCheck } }))} onCheckForUpdate={() => void checkAppUpdate()} preferences={preferences.mcpHttp} runtimeStatus={mcpStatus} onChange={(mcpHttp) => setPreferences((current) => ({ ...current, mcpHttp }))} onApply={applyMcp} onClose={() => setSettingsOpen(false)} />}
   </main>;
 }
 
@@ -91,10 +111,24 @@ function readPreferences(): ApplicationPreferences {
         enabled: candidate.mcpHttp?.enabled === true,
         port: typeof port === "number" && Number.isInteger(port) && port >= 1024 && port <= 65535 ? port : 3030,
       },
+      updates: {
+        autoCheck: candidate.updates?.autoCheck !== false,
+        lastCheckedAt: isValidTimestamp(candidate.updates?.lastCheckedAt) ? candidate.updates?.lastCheckedAt : undefined,
+      },
     };
   } catch {
     return DEFAULT_APPLICATION_PREFERENCES;
   }
+}
+
+function shouldCheckForUpdate(lastCheckedAt?: string): boolean {
+  if (!lastCheckedAt) return true;
+  const lastCheckedTime = Date.parse(lastCheckedAt);
+  return Number.isNaN(lastCheckedTime) || Date.now() - lastCheckedTime >= UPDATE_CHECK_INTERVAL_MS;
+}
+
+function isValidTimestamp(value: unknown): value is string {
+  return typeof value === "string" && !Number.isNaN(Date.parse(value));
 }
 
 function useResolvedTheme(theme: Theme): "dark" | "light" {

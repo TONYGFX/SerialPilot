@@ -81,6 +81,8 @@ header {
 .header-status .connection { justify-self: auto; }
 .settings-button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 1px solid #35434a; border-radius: 2px; background: #1d292d; color: #a9bbc0; line-height: 1; }
 .settings-button:hover { border-color: #50b977; background: #263f31; color: #d3edda; }
+.settings-button.update-available { position: relative; border-color: #4b9a66; color: #c7e9d0; }
+.settings-button.update-available::after { position: absolute; top: -3px; right: -3px; width: 7px; height: 7px; border: 1px solid #182126; border-radius: 50%; background: #55c778; content: ""; }
 .connection i { width: 7px; height: 7px; border-radius: 50%; background: #76848a; }
 .connection.online { border-color: #35734b; background: #20332a; color: #b9ddc2; }
 .connection.online i { background: #55c778; }
@@ -365,6 +367,13 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .about-details dd { color: #c9d8d4; font-family: var(--serial-mono-font); }
 .about-link { overflow: hidden; border: 0; padding: 0; background: transparent; color: #71c991; cursor: pointer; font: inherit; text-align: left; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
 .about-link:hover { color: #b9e8c7; text-decoration: underline; }
+.update-settings { display: grid; gap: 10px; padding-top: 16px; border-top: 1px solid #2b373c; }
+.update-settings .settings-section-title { margin: 0; }
+.update-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.update-actions .secondary, .update-actions .update-release-link { width: auto; min-height: 28px; padding: 0 10px; }
+.update-status { min-height: 16px; margin: 0; color: #839398; font-size: 10px; line-height: 1.5; }
+.update-status.available { color: #82d39a; }
+.update-status.failed { color: #d9958d; }
 .settings-section-title { margin-bottom: 18px; }
 .settings-section-title h2 { margin-bottom: 6px; font-size: 13px; }
 .settings-section-title p, .settings-note { margin: 0; color: #718189; font-size: 10px; line-height: 1.55; }
@@ -490,6 +499,8 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .app-shell[data-theme="light"] .mcp-status.online i { background: #3fa866; }
 .app-shell[data-theme="light"] .settings-button { border-color: #c8d4d7; background: #fff; color: #53676d; }
 .app-shell[data-theme="light"] .settings-button:hover { border-color: #59a675; background: #edf8f0; color: #237247; }
+.app-shell[data-theme="light"] .settings-button.update-available { border-color: #76af87; color: #237247; }
+.app-shell[data-theme="light"] .settings-button.update-available::after { border-color: #f8fafb; background: #3fa866; }
 .app-shell[data-theme="light"] .settings-theme-options { border-color: #bdcbcf; }
 .app-shell[data-theme="light"] .settings-theme-options button { border-color: #bdcbcf; background: #f2f6f7; color: #536a71; }
 .app-shell[data-theme="light"] .settings-theme-options button:hover, .app-shell[data-theme="light"] .settings-theme-options button.selected { background: #e7f5eb; color: #1e7044; }
@@ -502,6 +513,10 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .app-shell[data-theme="light"] .about-details dd { color: #203b32; }
 .app-shell[data-theme="light"] .about-link { color: #237247; }
 .app-shell[data-theme="light"] .about-link:hover { color: #155b35; }
+.app-shell[data-theme="light"] .update-settings { border-color: #d7e0e2; }
+.app-shell[data-theme="light"] .update-status { color: #687f86; }
+.app-shell[data-theme="light"] .update-status.available { color: #237247; }
+.app-shell[data-theme="light"] .update-status.failed { color: #9d3e36; }
 .app-shell[data-theme="light"] .view-tabs button { border-color: #d7e0e2; color: #65787e; }
 .app-shell[data-theme="light"] .view-tabs button.selected { color: #1f6b41; background: #eef8f1; box-shadow: inset 0 -2px #3ca866; }
 .app-shell[data-theme="light"] .error { border-color: #d86b60; color: #8f2f28; background: #fff0ee; }

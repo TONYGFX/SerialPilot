@@ -7,12 +7,13 @@
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { APP_VERSION, PROJECT_GITHUB_URL } from "../appInfo";
+import type { UpdateCheckStatus } from "../services/updateChecker";
 import type { McpHttpPreferences, McpHttpStatus, SendShortcut, TextCharset, Theme } from "../types/settings";
 import { NumberStepper, OptionPicker, type SelectOption } from "./FormControls";
 import { Icon } from "./Icon";
 
-const APP_VERSION = "0.1.2";
-type SettingsPage = "general" | "mcp" | "about";
+export type SettingsPage = "general" | "mcp" | "about";
 
 type McpDialogProps = {
   initialPage: SettingsPage;
@@ -20,10 +21,14 @@ type McpDialogProps = {
   textCharset: TextCharset;
   sendShortcut: SendShortcut;
   receiveDirectory: string;
+  autoUpdateCheck: boolean;
+  updateStatus: UpdateCheckStatus;
   onThemeChange: (theme: Theme) => void;
   onTextCharsetChange: (charset: TextCharset) => void;
   onSendShortcutChange: (shortcut: SendShortcut) => void;
   onReceiveDirectoryChange: (directory: string) => void;
+  onAutoUpdateCheckChange: (enabled: boolean) => void;
+  onCheckForUpdate: () => void;
   preferences: McpHttpPreferences;
   runtimeStatus: McpHttpStatus;
   onChange: (preferences: McpHttpPreferences) => void;
@@ -44,7 +49,7 @@ const SEND_SHORTCUTS: SelectOption[] = [
 ];
 
 /** Renders application settings, including MCP transport controls. */
-export function McpDialog({ initialPage, theme, textCharset, sendShortcut, receiveDirectory, onThemeChange, onTextCharsetChange, onSendShortcutChange, onReceiveDirectoryChange, preferences, runtimeStatus, onChange, onApply, onClose }: McpDialogProps) {
+export function McpDialog({ initialPage, theme, textCharset, sendShortcut, receiveDirectory, autoUpdateCheck, updateStatus, onThemeChange, onTextCharsetChange, onSendShortcutChange, onReceiveDirectoryChange, onAutoUpdateCheckChange, onCheckForUpdate, preferences, runtimeStatus, onChange, onApply, onClose }: McpDialogProps) {
   const [activePage, setActivePage] = useState<SettingsPage>(initialPage);
   const [error, setError] = useState<string>();
   const [isApplying, setIsApplying] = useState(false);
@@ -119,9 +124,39 @@ export function McpDialog({ initialPage, theme, textCharset, sendShortcut, recei
             {error && <p className="settings-error" role="alert">{error}</p>}
             <section className="mcp-stdio-note"><h3>stdio</h3><p>由外部 MCP 客户端启动 `serialpilot-mcp`。协议消息使用 stdout，诊断日志只写入 stderr。</p></section>
           </section>}
-          {activePage === "about" && <section className="about-page"><div className="settings-section-title"><h2>SerialPilot</h2><p>跨平台桌面端 AI 串口助手。</p></div><dl className="about-details"><div><dt>版本</dt><dd>{APP_VERSION}</dd></div><div><dt>开发者</dt><dd>TONYGFX</dd></div><div><dt>许可证</dt><dd>MIT License</dd></div><div><dt>版权</dt><dd>Copyright (c) 2026 TONYGFX</dd></div><div><dt>GitHub</dt><dd><button type="button" className="about-link" onClick={() => void openUrl("https://github.com/TONYGFX/SerialPilot")}>github.com/TONYGFX/SerialPilot</button></dd></div></dl></section>}
+          {activePage === "about" && <section className="about-page"><div className="settings-section-title"><h2>SerialPilot</h2><p>跨平台桌面端 AI 串口助手。</p></div><dl className="about-details"><div><dt>版本</dt><dd>{APP_VERSION}</dd></div><div><dt>开发者</dt><dd>TONYGFX</dd></div><div><dt>许可证</dt><dd>MIT License</dd></div><div><dt>版权</dt><dd>Copyright (c) 2026 TONYGFX</dd></div><div><dt>GitHub</dt><dd><button type="button" className="about-link" onClick={() => void openUrl(PROJECT_GITHUB_URL)}>github.com/TONYGFX/SerialPilot</button></dd></div></dl><UpdateSettings autoCheck={autoUpdateCheck} status={updateStatus} onAutoCheckChange={onAutoUpdateCheckChange} onCheck={onCheckForUpdate} /></section>}
         </div>
       </div>
     </section>
   </div>;
+}
+
+type UpdateSettingsProps = {
+  autoCheck: boolean;
+  status: UpdateCheckStatus;
+  onAutoCheckChange: (enabled: boolean) => void;
+  onCheck: () => void;
+};
+
+/** Renders the local update notification policy and manual release lookup. */
+function UpdateSettings({ autoCheck, status, onAutoCheckChange, onCheck }: UpdateSettingsProps) {
+  const checking = status.state === "checking";
+  const message = updateMessage(status);
+  const releaseUrl = status.state === "available" ? status.release.releaseUrl : undefined;
+  const releaseVersion = status.state === "available" ? status.release.version : undefined;
+
+  return <section className="update-settings">
+    <div className="settings-section-title"><h2>软件更新</h2><p>通过公开 GitHub Releases 检查新版本；检查只提示更新，不会自动下载或安装。</p></div>
+    <label className="check"><input type="checkbox" checked={autoCheck} onChange={(event) => onAutoCheckChange(event.target.checked)} />启动时自动检查更新</label>
+    <div className="update-actions"><button type="button" className="secondary" disabled={checking} onClick={onCheck}>{checking ? "正在检查" : "检查更新"}</button>{releaseUrl && releaseVersion && <button type="button" className="primary update-release-link" onClick={() => void openUrl(releaseUrl)}>查看 v{releaseVersion}</button>}</div>
+    <p className={`update-status ${status.state}`} role={status.state === "failed" ? "alert" : "status"}>{message}</p>
+  </section>;
+}
+
+function updateMessage(status: UpdateCheckStatus): string {
+  if (status.state === "checking") return "正在检查公开发布版本。";
+  if (status.state === "available") return `发现新版本 v${status.release.version}。`;
+  if (status.state === "up-to-date") return "当前已是最新版本。";
+  if (status.state === "failed") return "无法检查更新，请确认网络后重试。";
+  return "尚未检查更新。";
 }
