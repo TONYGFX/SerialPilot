@@ -1721,8 +1721,17 @@ async fn stream_file(
     if protocol != FileTransferProtocol::Null {
         let eot = [0x04];
         let before = state.lock().await.next_cursor.saturating_sub(1);
-        send_wire(&eot, outgoing, state, events, audit, changed, timeout_ms).await?;
-        if wait_for_control(
+        send_wire(
+            &eot,
+            outgoing.clone(),
+            state,
+            events,
+            audit,
+            changed,
+            timeout_ms,
+        )
+        .await?;
+        let Some((_eot_ack_cursor, _)) = wait_for_control(
             state,
             changed,
             cancel,
@@ -1732,9 +1741,47 @@ async fn stream_file(
             &[0x06],
         )
         .await
-        .is_none()
-        {
+        else {
             return Err((sent_bytes, cancellation_requested(cancel, action_id).await));
+        };
+        if protocol == FileTransferProtocol::Ymodem {
+            // Ymodem terminates with a zeroed block 0 after the receiver's
+            // post-EOT CRC request; without this packet receivers discard the
+            // temporary file after their confirmation timeout.
+            if wait_for_control(
+                state,
+                changed,
+                cancel,
+                action_id,
+                before,
+                timeout_ms,
+                &[0x43],
+            )
+            .await
+            .is_none()
+            {
+                return Err((sent_bytes, cancellation_requested(cancel, action_id).await));
+            }
+            let end_frame = xmodem_frame(0, &[0; 128], false);
+            let end_before = state.lock().await.next_cursor.saturating_sub(1);
+            send_wire(
+                &end_frame, outgoing, state, events, audit, changed, timeout_ms,
+            )
+            .await?;
+            if wait_for_control(
+                state,
+                changed,
+                cancel,
+                action_id,
+                end_before,
+                timeout_ms,
+                &[0x06],
+            )
+            .await
+            .is_none()
+            {
+                return Err((sent_bytes, cancellation_requested(cancel, action_id).await));
+            }
         }
     }
     if cancellation_requested(cancel, action_id).await {
@@ -2331,8 +2378,8 @@ async fn wait_for_control(
         drop(snapshot);
         for frame in frames {
             if let Ok(bytes) = BASE64.decode(&frame.raw_base64) {
-                if bytes.len() == 1 && accepted.contains(&bytes[0]) {
-                    return Some((frame.cursor, bytes[0]));
+                if let Some(byte) = bytes.into_iter().find(|byte| accepted.contains(byte)) {
+                    return Some((frame.cursor, byte));
                 }
             }
             cursor = frame.cursor;

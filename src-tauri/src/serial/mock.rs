@@ -72,7 +72,8 @@ impl SerialAdapter for MockSerialAdapter {
                 }
                 let is_packet = matches!(payload.first(), Some(0x01 | 0x02));
                 let is_ymodem_header = is_packet && payload.get(1) == Some(&0);
-                let mut response = if is_packet || payload == [0x04] {
+                let is_eot = payload == [0x04];
+                let mut response = if is_packet || is_eot {
                     vec![0x06]
                 } else {
                     vec![0xaa, 0x55]
@@ -81,6 +82,9 @@ impl SerialAdapter for MockSerialAdapter {
                     response.extend(payload);
                 }
                 if response_tx.send(response).await.is_err() {
+                    break;
+                }
+                if is_eot && response_tx.send(vec![0x43]).await.is_err() {
                     break;
                 }
                 if is_ymodem_header && !ymodem_header_seen {
