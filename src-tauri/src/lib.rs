@@ -10,6 +10,9 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(target_os = "windows")]
+use std::path::Path;
+
 use command::{CommandResult, EventKind, SerialCommand, SerialCore, SerialEvent};
 use mcp_http::{configure_server, McpHttpConfig, McpHttpServer, McpHttpStatus};
 use serial::DesktopSerialAdapter;
@@ -63,11 +66,7 @@ fn reveal_file(path: String) -> Result<(), String> {
     }
 
     #[cfg(target_os = "windows")]
-    let mut command = {
-        let mut command = std::process::Command::new("explorer.exe");
-        command.arg(format!("/select,{}", file_path.display()));
-        command
-    };
+    let mut command = explorer_select_command(&file_path);
     #[cfg(target_os = "macos")]
     let mut command = {
         let mut command = std::process::Command::new("open");
@@ -165,6 +164,15 @@ fn is_terminal_file_progress(event: &SerialEvent) -> bool {
         .any(|field| event.detail.get(*field).and_then(|value| value.as_bool()) == Some(true))
 }
 
+#[cfg(target_os = "windows")]
+fn explorer_select_command(path: &Path) -> std::process::Command {
+    let mut command = std::process::Command::new("explorer.exe");
+    // Explorer only selects the item when its switch and absolute path are
+    // separate arguments. Combining them makes Explorer fall back to a folder.
+    command.arg("/select,").arg(path);
+    command
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -213,5 +221,16 @@ mod tests {
             &completed,
             &mut progress_updates
         ));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn explorer_selects_the_exact_received_file_path() {
+        let path = r"C:\Users\TONYGFX\Downloads\serialpilot (21).txt";
+        let arguments = explorer_select_command(Path::new(path))
+            .get_args()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(arguments, vec!["/select,".to_string(), path.to_string()]);
     }
 }
