@@ -65,6 +65,18 @@ describe("configured waveform retention and geometry", () => {
     expect(chart.labelBaseline).toBeLessThan(chart.viewportHeight - 28);
   });
 
+  it("uses a smooth monotone path for three or more time-ordered samples", () => {
+    const samples = [
+      ...parseConfiguredFrame(createFrame("X1=10\r\n"), CHANNELS),
+      ...parseConfiguredFrame({ ...createFrame("X1=18\r\n"), cursor: 10, timestamp_ms: 1010 }, CHANNELS),
+      ...parseConfiguredFrame({ ...createFrame("X1=12\r\n"), cursor: 11, timestamp_ms: 1020 }, CHANNELS),
+    ];
+    const chart = buildWaveChart(samples, CHANNELS, { width: 640, height: 360 });
+
+    expect(chart.series[0].path).toContain("C");
+    expect(chart.series[0].path).not.toContain("L");
+  });
+
   it("keeps existing samples usable when display channel settings change", () => {
     const samples = parseConfiguredFrame(createFrame("X1=10,X2=20\r\n"), CHANNELS);
     const renamedChannels = CHANNELS.map((channel) => channel.id === "x1" ? { ...channel, name: "Voltage" } : channel);

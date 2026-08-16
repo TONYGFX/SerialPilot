@@ -5,7 +5,7 @@
  */
 
 /** Version displayed by the desktop application and used for update checks. */
-export const APP_VERSION = "0.1.2";
+export const APP_VERSION = "0.1.3";
 
 /** Public project home page opened from the About settings page. */
 export const PROJECT_GITHUB_URL = "https://github.com/TONYGFX/SerialPilot";

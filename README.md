@@ -149,7 +149,7 @@ MCP 的 `serial.send`、`serial.exchange` 及批量请求可选传入 `text_char
 
 Windows 用户下载发布页中的 `serialpilot.exe` 即可运行。`serialpilot-mcp.exe` 和 `serialpilot-mcp-http.exe` 是给需要独立 MCP 服务的用户使用的辅助程序，不是桌面 UI。
 
-当前版本：**v0.1.2**
+当前版本：**v0.1.3**
 
 ## 从源码运行
 

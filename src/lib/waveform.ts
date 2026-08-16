@@ -170,9 +170,56 @@ function createChartSeries(samples: WaveSample[], channel: WaveChannel, min: num
   return {
     channel,
     points,
-    path: points.map((point, index) => (index === 0 ? "M" : "L") + point.x.toFixed(2) + "," + point.y.toFixed(2)).join(" "),
+    path: createSmoothPath(points),
     lastPoint: points.at(-1),
   };
+}
+
+/**
+ * Produces a monotone cubic path through time-ordered samples. The weighted
+ * tangents make adjacent segments visually continuous without inventing an
+ * overshoot at a real peak or valley.
+ */
+function createSmoothPath(points: ChartPoint[]): string {
+  if (points.length === 0) return "";
+  if (points.length === 1) return moveTo(points[0]);
+  if (points.length === 2 || points.some((point, index) => index > 0 && point.x <= points[index - 1].x)) return createPolylinePath(points);
+
+  const intervals = points.slice(1).map((point, index) => point.x - points[index].x);
+  const gradients = points.slice(1).map((point, index) => (point.y - points[index].y) / intervals[index]);
+  const tangents = points.map((_, index) => {
+    if (index === 0) return gradients[0];
+    if (index === points.length - 1) return gradients.at(-1)!;
+    const previous = gradients[index - 1];
+    const next = gradients[index];
+    if (previous === 0 || next === 0 || Math.sign(previous) !== Math.sign(next)) return 0;
+    const previousInterval = intervals[index - 1];
+    const nextInterval = intervals[index];
+    const leftWeight = 2 * nextInterval + previousInterval;
+    const rightWeight = nextInterval + 2 * previousInterval;
+    return (leftWeight + rightWeight) / (leftWeight / previous + rightWeight / next);
+  });
+
+  let path = moveTo(points[0]);
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const start = points[index];
+    const end = points[index + 1];
+    const interval = intervals[index];
+    path += ` C${formatCoordinate(start.x + interval / 3)},${formatCoordinate(start.y + tangents[index] * interval / 3)} ${formatCoordinate(end.x - interval / 3)},${formatCoordinate(end.y - tangents[index + 1] * interval / 3)} ${formatCoordinate(end.x)},${formatCoordinate(end.y)}`;
+  }
+  return path;
+}
+
+function createPolylinePath(points: ChartPoint[]): string {
+  return points.map((point, index) => (index === 0 ? "M" : "L") + formatCoordinate(point.x) + "," + formatCoordinate(point.y)).join(" ");
+}
+
+function moveTo(point: ChartPoint): string {
+  return `M${formatCoordinate(point.x)},${formatCoordinate(point.y)}`;
+}
+
+function formatCoordinate(value: number): string {
+  return value.toFixed(2);
 }
 
 function sampleToPoint(sample: WaveSample, min: number, max: number, timeRange: { startMs: number; endMs: number }, geometry: Pick<WaveChart, "left" | "top" | "plotWidth" | "plotHeight">): ChartPoint {
