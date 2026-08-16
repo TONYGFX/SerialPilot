@@ -287,6 +287,8 @@ code { overflow: hidden; color: #d7e5e0; font: 11px var(--serial-mono-font); tex
 .frame code { min-width: 0; overflow: visible; text-overflow: clip; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .composer { display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; min-height: 150px; height: 100%; border-top: 0; }
 .composer-head { border-bottom: 0; }
+.composer-title { display: inline-flex; align-items: baseline; gap: 8px; min-width: 0; }
+.composer-title small { overflow: hidden; color: #91a0a6; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .segmented { display: inline-flex; overflow: hidden; border: 1px solid #35434a; border-radius: 2px; }
 .segmented button { min-width: 43px; padding: 5px 7px; border: 0; border-right: 1px solid #35434a; background: #141b1f; color: #91a0a6; font-size: 10px; }
 .segmented button:last-child { border-right: 0; }

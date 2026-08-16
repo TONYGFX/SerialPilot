@@ -19,6 +19,7 @@ type TerminalPanelProps = {
   encoding: "text" | "hex";
   payload: string;
   canSend: boolean;
+  fileTransferActive: boolean;
   onPause: () => void;
   onClear: () => void;
   onSave: () => void;
@@ -36,7 +37,7 @@ type ReceiveDisplayMode = "text" | "hex";
  * @param props Frame history, status metrics and command callbacks.
  * @returns The terminal workspace panel.
  */
-export function TerminalPanel({ activity, status, paused, textCharset, sendShortcut, encoding, payload, canSend, onPause, onClear, onSave, onEncoding, onPayload, onSend }: TerminalPanelProps) {
+export function TerminalPanel({ activity, status, paused, textCharset, sendShortcut, encoding, payload, canSend, fileTransferActive, onPause, onClear, onSave, onEncoding, onPayload, onSend }: TerminalPanelProps) {
   const [composerHeight, setComposerHeight] = useState(190);
   const [directionFilter, setDirectionFilter] = useState<DirectionFilter>({ rx: true, tx: true });
   const [receiveDisplayMode, setReceiveDisplayMode] = useState<ReceiveDisplayMode>("text");
@@ -63,7 +64,7 @@ export function TerminalPanel({ activity, status, paused, textCharset, sendShort
     <div className="log-head"><h2>实时 TX / RX</h2><div className="log-actions"><DirectionFilterPicker value={directionFilter} onChange={setDirectionFilter} /><DisplayModePicker value={receiveDisplayMode} onChange={setReceiveDisplayMode} /><button type="button" className="icon-button" title={paused ? "继续接收显示" : "暂停接收显示"} aria-label={paused ? "继续接收显示" : "暂停接收显示"} onClick={onPause}><Icon name={paused ? "play" : "pause"} /></button><button type="button" className="icon-button" title="保存接收数据" aria-label="保存接收数据" onClick={onSave}><Icon name="download" /></button><button type="button" className="icon-button" title="清空接收数据" aria-label="清空接收数据" onClick={onClear}><Icon name="trash" /></button></div></div>
     <FrameLog activity={activity} directionFilter={directionFilter} displayMode={receiveDisplayMode} textCharset={textCharset} />
     <ResizableDivider orientation="horizontal" value={composerHeight} min={150} max={360} onChange={setComposerHeight} label="调整发送区高度" />
-    <SendComposer encoding={encoding} payload={payload} canSend={canSend} sendShortcut={sendShortcut} onEncoding={onEncoding} onPayload={onPayload} onSend={onSend} />
+    <SendComposer encoding={encoding} payload={payload} canSend={canSend} fileTransferActive={fileTransferActive} sendShortcut={sendShortcut} onEncoding={onEncoding} onPayload={onPayload} onSend={onSend} />
   </section>;
 }
 
@@ -132,7 +133,7 @@ function formatHexBytes(rawHex: string): string {
   return normalized.match(/.{1,2}/g)?.join(" ") ?? "";
 }
 
-function SendComposer({ encoding, payload, canSend, sendShortcut, onEncoding, onPayload, onSend }: Pick<TerminalPanelProps, "encoding" | "payload" | "canSend" | "sendShortcut" | "onEncoding" | "onPayload" | "onSend">) {
+function SendComposer({ encoding, payload, canSend, fileTransferActive, sendShortcut, onEncoding, onPayload, onSend }: Pick<TerminalPanelProps, "encoding" | "payload" | "canSend" | "fileTransferActive" | "sendShortcut" | "onEncoding" | "onPayload" | "onSend">) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const changeEncoding = (next: "text" | "hex") => {
     onEncoding(next);
@@ -162,7 +163,7 @@ function SendComposer({ encoding, payload, canSend, sendShortcut, onEncoding, on
     event.currentTarget.form?.requestSubmit();
   };
 
-  return <form className="composer" onSubmit={onSend}><div className="composer-head"><h2>发送</h2><div className="segmented"><button type="button" className={encoding === "text" ? "selected" : ""} onClick={() => changeEncoding("text")}>文本</button><button type="button" className={encoding === "hex" ? "selected" : ""} onClick={() => changeEncoding("hex")}>HEX</button></div></div><textarea ref={textareaRef} value={payload} onChange={changePayload} onKeyDown={submitFromShortcut} spellCheck={false} placeholder={encoding === "hex" ? "AA 55 01" : "输入文本"} /><button className="primary send" disabled={!canSend} type="submit">发送</button></form>;
+  return <form className="composer" onSubmit={onSend}><div className="composer-head"><div className="composer-title"><h2>发送</h2>{fileTransferActive && <small>文件传输进行中</small>}</div><div className="segmented"><button type="button" disabled={fileTransferActive} className={encoding === "text" ? "selected" : ""} onClick={() => changeEncoding("text")}>文本</button><button type="button" disabled={fileTransferActive} className={encoding === "hex" ? "selected" : ""} onClick={() => changeEncoding("hex")}>HEX</button></div></div><textarea ref={textareaRef} disabled={fileTransferActive} value={payload} onChange={changePayload} onKeyDown={submitFromShortcut} spellCheck={false} placeholder={fileTransferActive ? "文件传输进行中，完成、失败或取消后可继续发送" : encoding === "hex" ? "AA 55 01" : "输入文本"} /><button className="primary send" disabled={!canSend} type="submit">发送</button></form>;
 }
 
 function shouldSubmitFromShortcut(event: ReactKeyboardEvent<HTMLTextAreaElement>, shortcut: SendShortcut): boolean {

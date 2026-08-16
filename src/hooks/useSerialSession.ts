@@ -55,6 +55,7 @@ export type SerialSession = {
   fileProgress?: FileSendProgress;
   filePath: string;
   fileProtocol: FileTransferProtocol;
+  fileTransferActive: boolean;
   waveformPaused: boolean;
   payload: string;
   encoding: "text" | "hex";
@@ -105,6 +106,7 @@ export function useSerialSession(textCharset: TextCharset): SerialSession {
   const [waveChannels, setWaveChannelsState] = useState<WaveChannel[]>([]);
   const [fileProgress, setFileProgress] = useState<FileSendProgress>();
   const [fileReceiveProgress, setFileReceiveProgress] = useState<FileReceiveProgress[]>([]);
+  const [fileSendStarting, setFileSendStarting] = useState(false);
   const [filePath, setFilePath] = useState("");
   const [fileProtocol, setFileProtocol] = useState<FileTransferProtocol>("null");
   const [payload, setPayload] = useState("01 03 00 00 00 02");
@@ -112,7 +114,7 @@ export function useSerialSession(textCharset: TextCharset): SerialSession {
   const [paused, setPaused] = useState(false);
   const [waveformPaused, setWaveformPaused] = useState(true);
   const [autoReconnect, setAutoReconnectState] = useState(false);
-  const [timedSend, setTimedSend] = useState(false);
+  const [timedSend, setTimedSendState] = useState(false);
   const [timerSeconds, setTimerSeconds] = useState(1);
   const [error, setError] = useState<string>();
   const pausedRef = useRef(false);
@@ -125,6 +127,7 @@ export function useSerialSession(textCharset: TextCharset): SerialSession {
   const manuallyClosedRef = useRef(false);
   const hasConnectedRef = useRef(false);
   const sessionId = status.session_id;
+  const fileTransferActive = isFileTransferActive(fileProgress, fileReceiveProgress, fileSendStarting);
 
   useEffect(() => { pausedRef.current = paused; }, [paused]);
   useEffect(() => { waveformPausedRef.current = waveformPaused; }, [waveformPaused]);
@@ -165,7 +168,7 @@ export function useSerialSession(textCharset: TextCharset): SerialSession {
       .then((result) => setWaveChannelsState(result.channels))
       .catch((cause) => setError(String(cause)));
   }, []);
-  useTimedSend(timedSend, status.connected, sessionId, timerSeconds, encoding, textCharset, payload, setError);
+  useTimedSend(timedSend && !fileTransferActive, status.connected, sessionId, timerSeconds, encoding, textCharset, payload, setError);
   useAutoReconnect(autoReconnect, status.connected, manuallyClosedRef, hasConnectedRef, config);
 
   const open = async () => {
@@ -180,7 +183,7 @@ export function useSerialSession(textCharset: TextCharset): SerialSession {
   };
   const send = async (event: FormEvent) => {
     event.preventDefault();
-    if (!sessionId) return;
+    if (!sessionId || fileTransferActive) return;
     setError(undefined);
     if (filePath) {
       await sendFile(filePath, 256, 10);
@@ -214,16 +217,22 @@ export function useSerialSession(textCharset: TextCharset): SerialSession {
   const setAutoReconnect = (enabled: boolean) => {
     setAutoReconnectState(enabled);
   };
+  const setTimedSend = (enabled: boolean) => {
+    if (!fileTransferActive) setTimedSendState(enabled);
+  };
   const sendFile = async (filePath: string, chunkSize: number, intervalMs: number) => {
-    if (!sessionId) return;
+    if (!sessionId || fileTransferActive) return;
     const actionId = crypto.randomUUID();
     cancelledFileActionRef.current = undefined;
+    setFileSendStarting(true);
     setError(undefined);
     try {
       const result = await executeSerialCommand<{ type: "file_send_started"; action_id: string; file_size: number; chunk_size: number }>({ type: "send_file", session_id: sessionId, file_path: filePath, protocol: fileProtocol, chunk_size: chunkSize, interval_ms: intervalMs, timeout_ms: 10_000, action_id: actionId });
       setFileProgress((current) => current?.action_id === result.action_id ? current : { action_id: result.action_id, file_path: filePath, file_size: result.file_size, sent_bytes: 0, chunk_size: result.chunk_size, completed: false, cancelled: false, failed: false });
     } catch (cause) {
       setError(String(cause));
+    } finally {
+      setFileSendStarting(false);
     }
   };
   const cancelFileSend = async () => {
@@ -287,7 +296,7 @@ export function useSerialSession(textCharset: TextCharset): SerialSession {
     }
   };
 
-  return { ports, config, status, frames, waveSamples, waveChannels, fileProgress, fileReceiveProgress, filePath, fileProtocol, waveformPaused, payload, encoding, paused, autoReconnect, timedSend, timerSeconds, error, setConfig, setPayload, setEncoding, setFilePath, setFileProtocol, setTimedSend, setTimerSeconds, setWaveChannels, refreshPorts, open, close, send, sendFile, cancelFileSend, dismissFileSend, receiveFile, cancelFileReceive, dismissFileReceive, openReceivedFile, clearFrames, clearWaveform, saveFrames, togglePaused, toggleWaveformPaused, setAutoReconnect };
+  return { ports, config, status, frames, waveSamples, waveChannels, fileProgress, fileReceiveProgress, filePath, fileProtocol, fileTransferActive, waveformPaused, payload, encoding, paused, autoReconnect, timedSend, timerSeconds, error, setConfig, setPayload, setEncoding, setFilePath, setFileProtocol, setTimedSend, setTimerSeconds, setWaveChannels, refreshPorts, open, close, send, sendFile, cancelFileSend, dismissFileSend, receiveFile, cancelFileReceive, dismissFileReceive, openReceivedFile, clearFrames, clearWaveform, saveFrames, togglePaused, toggleWaveformPaused, setAutoReconnect };
 }
 
 function useSerialEvents(handlers: SerialEventHandlers) {
@@ -348,6 +357,16 @@ function handleSerialEvent(event: SerialEvent, pausedRef: MutableRefObject<boole
 
 function isReceiveActive(progress: FileReceiveProgress): boolean {
   return !progress.completed && !progress.cancelled && !progress.failed;
+}
+
+/**
+ * Returns whether a file operation currently owns the serial writer and reader.
+ * Completed receive records remain visible, but no longer block ordinary traffic.
+ */
+export function isFileTransferActive(send: FileSendProgress | undefined, receive: FileReceiveProgress[], sendStarting: boolean): boolean {
+  if (sendStarting) return true;
+  if (send && !send.completed && !send.cancelled && !send.failed) return true;
+  return receive.some(isReceiveActive);
 }
 
 function createWaitingReceiveProgress(actionId: string): FileReceiveProgress {

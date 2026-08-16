@@ -16,6 +16,7 @@ type SettingsPanelProps = {
   autoReconnect: boolean;
   timedSend: boolean;
   timerSeconds: number;
+  transferActive: boolean;
   onChange: (config: SerialConfig) => void;
   onOpen: () => void;
   onClose: () => void;
@@ -49,7 +50,7 @@ const PARITY_OPTIONS: SelectOption[] = [{ value: "none", label: "无" }, { value
  * @param props Connection state and callbacks supplied by the serial-session hook.
  * @returns The serial settings sidebar.
  */
-export function SettingsPanel({ config, ports, connected, autoReconnect, timedSend, timerSeconds, fileProtocol, fileProgress, fileReceiveProgress, receiveDirectory, onChange, onOpen, onClose, onRefreshPorts, onAutoReconnect, onTimedSend, onTimerSeconds, onFilePath, onFileProtocol, onCancelFileSend, onDismissFileSend, onReceiveFile, onCancelFileReceive, onDismissFileReceive, onOpenReceivedFile }: SettingsPanelProps) {
+export function SettingsPanel({ config, ports, connected, autoReconnect, timedSend, timerSeconds, transferActive, fileProtocol, fileProgress, fileReceiveProgress, receiveDirectory, onChange, onOpen, onClose, onRefreshPorts, onAutoReconnect, onTimedSend, onTimerSeconds, onFilePath, onFileProtocol, onCancelFileSend, onDismissFileSend, onReceiveFile, onCancelFileReceive, onDismissFileReceive, onOpenReceivedFile }: SettingsPanelProps) {
   return <aside className="settings" aria-label="串口配置">
     <div className="settings-title"><h2>串口配置</h2><button type="button" className="tool-button" title="刷新串口列表" aria-label="刷新串口列表" onClick={onRefreshPorts}><Icon name="refresh" /></button></div>
     <label>端口<OptionPicker value={config.port} disabled={connected} options={ports.map((port) => ({ value: port.id, label: port.display_name }))} onChange={(port) => onChange({ ...config, port })} /></label>
@@ -58,7 +59,7 @@ export function SettingsPanel({ config, ports, connected, autoReconnect, timedSe
     <div className="signal-row" aria-label="串口信号线"><span className="signal-indicator unavailable" title="RI：当前适配器未提供状态读取">RI</span><span className="signal-indicator unavailable" title="DSR：当前适配器未提供状态读取">DSR</span><span className="signal-indicator unavailable" title="CTS：当前适配器未提供状态读取">CTS</span><button type="button" className={`signal-toggle ${config.dtr ? "active" : ""}`} title="DTR：打开端口前配置主机就绪线" aria-pressed={config.dtr} disabled={connected} onClick={() => onChange({ ...config, dtr: !config.dtr })}>DTR</button><button type="button" className={`signal-toggle ${config.rts ? "active" : ""}`} title="RTS：打开端口前配置请求发送线" aria-pressed={config.rts} disabled={connected} onClick={() => onChange({ ...config, rts: !config.rts })}>RTS</button></div>
     {connected ? <button className="danger" onClick={onClose}>关闭串口</button> : <button className="primary" onClick={onOpen}>打开串口</button>}
     <div className="settings-divider" />
-    <h2>发送控制</h2><div className="timed-send-control"><label className="check"><input type="checkbox" checked={timedSend} onChange={(event) => onTimedSend(event.target.checked)} />定时发送</label><div className="timed-send-interval"><div className="unit-stepper"><NumberStepper value={timerSeconds} min={0.1} max={3600} step={0.1} ariaLabel="定时发送间隔秒数" onChange={onTimerSeconds} /><span>秒</span></div></div></div>
+    <h2>发送控制</h2><div className="timed-send-control"><label className="check"><input type="checkbox" disabled={transferActive} checked={timedSend} onChange={(event) => onTimedSend(event.target.checked)} />定时发送</label><div className="timed-send-interval"><div className="unit-stepper"><NumberStepper value={timerSeconds} min={0.1} max={3600} step={0.1} ariaLabel="定时发送间隔秒数" onChange={onTimerSeconds} /><span>秒</span></div></div></div>
     <div className="settings-divider" />
     <FileTransferSettings connected={connected} fileProtocol={fileProtocol} fileProgress={fileProgress} fileReceiveProgress={fileReceiveProgress} receiveDirectory={receiveDirectory} onFilePath={onFilePath} onFileProtocol={onFileProtocol} onCancelFileSend={onCancelFileSend} onDismissFileSend={onDismissFileSend} onReceiveFile={onReceiveFile} onCancelFileReceive={onCancelFileReceive} onDismissFileReceive={onDismissFileReceive} onOpenReceivedFile={onOpenReceivedFile} />
   </aside>;
