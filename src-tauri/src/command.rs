@@ -465,6 +465,7 @@ pub enum EventKind {
     CommandCompleted,
     CommandFailed,
     Frame,
+    FileFrame,
     FileProgress,
     FileReceiveProgress,
 }
@@ -1041,10 +1042,18 @@ impl SerialCore {
         let events = self.events.clone();
         let audit = self.audit.clone();
         let changed = self.changed.clone();
+        let file_send = self.file_send.clone();
+        let file_receive = self.file_receive.clone();
         let reader = tokio::spawn(async move {
             while let Some(bytes) = incoming.recv().await {
                 let frame = append_frame(&state, Direction::Rx, bytes).await;
-                record_event(&events, &audit, frame_event(frame));
+                let kind =
+                    if file_send.lock().await.is_some() || file_receive.lock().await.is_some() {
+                        EventKind::FileFrame
+                    } else {
+                        EventKind::Frame
+                    };
+                record_event(&events, &audit, frame_event(frame, kind));
                 changed.notify_waiters();
             }
         });
@@ -2331,7 +2340,7 @@ async fn send_wire(
     .map_err(|_| (0, false))
     .and_then(|result| result.map_err(|_| (0, false)))?;
     let frame = append_frame(state, Direction::Tx, bytes.to_vec()).await;
-    record_event(events, audit, frame_event(frame));
+    record_event(events, audit, frame_event(frame, EventKind::FileFrame));
     changed.notify_waiters();
     Ok(())
 }
@@ -2619,11 +2628,11 @@ fn charset_name(charset: TextCharset) -> &'static str {
     }
 }
 
-fn frame_event(frame: Frame) -> SerialEvent {
+fn frame_event(frame: Frame, kind: EventKind) -> SerialEvent {
     SerialEvent {
         event_id: Uuid::new_v4().to_string(),
         timestamp_ms: now_ms(),
-        kind: EventKind::Frame,
+        kind,
         action: "frame".into(),
         action_id: None,
         detail: serde_json::to_value(frame).unwrap_or_default(),
@@ -2993,8 +3002,12 @@ mod tests {
             }
         ));
         let mut progress = None;
+        let mut saw_file_frame = false;
         for _ in 0..20 {
             if let Some(event) = events.try_recv().ok() {
+                if matches!(event.kind, EventKind::FileFrame) {
+                    saw_file_frame = true;
+                }
                 if matches!(event.kind, EventKind::FileProgress) {
                     progress = serde_json::from_value::<FileProgress>(event.detail).ok();
                 }
@@ -3025,6 +3038,10 @@ mod tests {
             3
         );
         assert!(progress.is_some_and(|item| item.completed && item.sent_bytes == 5));
+        assert!(
+            saw_file_frame,
+            "file payloads should remain structured audit events"
+        );
         tokio::fs::remove_file(path).await.unwrap();
     }
 

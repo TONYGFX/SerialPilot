@@ -31,7 +31,7 @@ export type SerialFrame = {
 export type SerialEvent = {
   event_id: string;
   timestamp_ms: number;
-  kind: "command_started" | "command_completed" | "command_failed" | "frame" | "file_progress" | "file_receive_progress";
+  kind: "command_started" | "command_completed" | "command_failed" | "frame" | "file_frame" | "file_progress" | "file_receive_progress";
   action: string;
   action_id?: string | null;
   detail: unknown;

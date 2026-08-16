@@ -3,10 +3,14 @@ pub mod mcp;
 pub mod mcp_http;
 pub mod serial;
 
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
-use command::{CommandResult, SerialCommand, SerialCore};
+use command::{CommandResult, EventKind, SerialCommand, SerialCore, SerialEvent};
 use mcp_http::{configure_server, McpHttpConfig, McpHttpServer, McpHttpStatus};
 use serial::DesktopSerialAdapter;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -92,7 +96,19 @@ pub fn run() {
             let mut events = core.subscribe();
             let handle: AppHandle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                while let Ok(event) = events.recv().await {
+                let mut progress_updates = HashMap::new();
+                loop {
+                    let event = match events.recv().await {
+                        Ok(event) => event,
+                        // File data remains audited by the core. If its high-frequency
+                        // events briefly outrun the desktop bridge, resume from the
+                        // newest event instead of permanently losing desktop updates.
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    };
+                    if !should_forward_event_to_desktop(&event, &mut progress_updates) {
+                        continue;
+                    }
                     let _ = handle.emit("serial-event", event);
                 }
             });
@@ -108,4 +124,94 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to run SerialPilot");
+}
+
+/// Keeps bulk transfer bytes in the core audit while protecting the WebView
+/// from decoding and laying out every binary packet during a file transfer.
+fn should_forward_event_to_desktop(
+    event: &SerialEvent,
+    progress_updates: &mut HashMap<String, Instant>,
+) -> bool {
+    if matches!(event.kind, EventKind::FileFrame) {
+        return false;
+    }
+    if !matches!(
+        event.kind,
+        EventKind::FileProgress | EventKind::FileReceiveProgress
+    ) {
+        return true;
+    }
+    let key = event
+        .action_id
+        .clone()
+        .unwrap_or_else(|| event.action.clone());
+    if is_terminal_file_progress(event) {
+        progress_updates.remove(&key);
+        return true;
+    }
+    let now = Instant::now();
+    let should_forward = progress_updates
+        .get(&key)
+        .is_none_or(|last| now.duration_since(*last) >= Duration::from_millis(100));
+    if should_forward {
+        progress_updates.insert(key, now);
+    }
+    should_forward
+}
+
+fn is_terminal_file_progress(event: &SerialEvent) -> bool {
+    ["completed", "cancelled", "failed"]
+        .iter()
+        .any(|field| event.detail.get(*field).and_then(|value| value.as_bool()) == Some(true))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn event(kind: EventKind, detail: serde_json::Value) -> SerialEvent {
+        SerialEvent {
+            event_id: "event".into(),
+            timestamp_ms: 0,
+            kind,
+            action: "serial.send_file".into(),
+            action_id: Some("transfer".into()),
+            detail,
+        }
+    }
+
+    #[test]
+    fn file_frames_stay_out_of_the_desktop_event_stream() {
+        let mut progress_updates = HashMap::new();
+        assert!(!should_forward_event_to_desktop(
+            &event(EventKind::FileFrame, serde_json::json!({})),
+            &mut progress_updates,
+        ));
+    }
+
+    #[test]
+    fn file_progress_is_throttled_but_terminal_state_is_immediate() {
+        let mut progress_updates = HashMap::new();
+        let ongoing = event(
+            EventKind::FileProgress,
+            serde_json::json!({ "completed": false }),
+        );
+        let completed = event(
+            EventKind::FileProgress,
+            serde_json::json!({ "completed": true }),
+        );
+
+        assert!(should_forward_event_to_desktop(
+            &ongoing,
+            &mut progress_updates
+        ));
+        assert!(!should_forward_event_to_desktop(
+            &ongoing,
+            &mut progress_updates
+        ));
+        assert!(should_forward_event_to_desktop(
+            &completed,
+            &mut progress_updates
+        ));
+    }
 }
