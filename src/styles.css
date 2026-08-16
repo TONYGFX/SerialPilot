@@ -317,8 +317,9 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .file-progress-line strong { order: 2; min-width: 38px; color: #9eb0b4; font: 9px var(--serial-mono-font); text-align: right; }
 .file-progress-line > button { flex: 0 0 auto; white-space: nowrap; }
 .file-progress-actions { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; }
-.file-cancel { order: 3; min-height: 21px; padding: 0 7px; border: 1px solid #70423f; border-radius: 2px; background: #291d1d; color: #d9958d; font-size: 9px; }
-.file-cancel:hover { border-color: #b6534d; background: #3a2321; color: #fff; }
+.file-picker.file-cancel, .file-progress-line .file-cancel { min-height: 21px; padding: 0 7px; border: 1px solid #70423f; border-radius: 2px; background: #291d1d; color: #d9958d; font-size: 9px; }
+.file-progress-line .file-cancel { order: 3; }
+.file-picker.file-cancel:hover, .file-progress-line .file-cancel:hover { border-color: #b6534d; background: #3a2321; color: #fff; }
 .file-dismiss { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 21px; padding: 0 7px; border: 1px solid #40535a; border-radius: 2px; background: #202b30; color: #b4c4c7; font-size: 9px; }
 .file-dismiss:hover { border-color: #668087; background: #2a383e; color: #fff; }
 .file-open { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 21px; padding: 0 7px; border: 1px solid #3e7656; border-radius: 2px; background: #1d3027; color: #a8d7b8; font-size: 9px; white-space: nowrap; }
@@ -547,8 +548,8 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .app-shell[data-theme="light"] .file-progress-head strong { color: #237247; }
 .app-shell[data-theme="light"] .file-progress-line small { color: #60757c; }
 .app-shell[data-theme="light"] .file-progress-line strong { color: #4d646b; }
-.app-shell[data-theme="light"] .file-cancel { border-color: #d88981; background: #fff0ee; color: #a23e35; }
-.app-shell[data-theme="light"] .file-cancel:hover { border-color: #b6534d; background: #fbe0dc; color: #842d27; }
+.app-shell[data-theme="light"] .file-picker.file-cancel, .app-shell[data-theme="light"] .file-progress-line .file-cancel { border-color: #d88981; background: #fff0ee; color: #a23e35; }
+.app-shell[data-theme="light"] .file-picker.file-cancel:hover, .app-shell[data-theme="light"] .file-progress-line .file-cancel:hover { border-color: #b6534d; background: #fbe0dc; color: #842d27; }
 .app-shell[data-theme="light"] .file-dismiss { border-color: #bdcbcf; background: #f6f9fa; color: #526b72; }
 .app-shell[data-theme="light"] .file-dismiss:hover { border-color: #91a8ae; background: #edf3f4; color: #314d55; }
 .app-shell[data-theme="light"] .file-open { border-color: #8fc0a1; background: #edf8f0; color: #276c42; }
