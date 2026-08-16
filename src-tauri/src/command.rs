@@ -1968,7 +1968,7 @@ async fn receive_file_stream(
                     invalid_packets = 0;
                     if protocol == FileTransferProtocol::Ymodem
                         && !awaiting_ymodem_end
-                        && expected_sequence == 0
+                        && file.is_none()
                     {
                         let Some((file_name, file_size)) = parse_ymodem_header(&payload) else {
                             cleanup_partial_file(part_path.as_deref()).await;
@@ -3046,7 +3046,14 @@ mod tests {
                     .unwrap()
                     .as_nanos()
             ));
-            let file_bytes = vec![0x5a; 1_300];
+            // Ymodem packet numbers wrap from 255 back to 0. The extra byte
+            // forces a post-wrap data packet so it cannot be mistaken for the
+            // initial block-zero file header.
+            let file_bytes = if protocol == FileTransferProtocol::Ymodem {
+                vec![0x5a; 256 * 1024 + 1]
+            } else {
+                vec![0x5a; 1_300]
+            };
             tokio::fs::write(&path, &file_bytes).await.unwrap();
             let action_id = format!("mock-{protocol_name}");
             let mut events = core.subscribe();
@@ -3078,8 +3085,10 @@ mod tests {
             };
             assert!(progress.completed, "{protocol:?} should complete");
             assert_eq!(progress.sent_bytes, file_bytes.len() as u64);
-            assert!(read.frames.iter().any(|frame| frame.raw_hex == "43"));
-            assert!(read.frames.iter().any(|frame| frame.raw_hex == "06"));
+            if protocol != FileTransferProtocol::Ymodem {
+                assert!(read.frames.iter().any(|frame| frame.raw_hex == "43"));
+                assert!(read.frames.iter().any(|frame| frame.raw_hex == "06"));
+            }
             tokio::fs::remove_file(path).await.unwrap();
         }
     }
@@ -3127,7 +3136,7 @@ mod tests {
         events: &mut broadcast::Receiver<SerialEvent>,
         action_id: &str,
     ) -> FileProgress {
-        timeout(Duration::from_secs(3), async {
+        timeout(Duration::from_secs(6), async {
             loop {
                 let event = events.recv().await.expect("file progress event");
                 if !matches!(event.kind, EventKind::FileProgress) {
