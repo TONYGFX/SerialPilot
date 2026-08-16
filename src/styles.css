@@ -273,6 +273,7 @@ select, input:not([type="checkbox"]) { height: 31px; padding: 0 8px; }
 .receive-display-picker button:last-child { border-right: 1px solid #35434a; border-radius: 0 2px 2px 0; }
 .receive-display-picker button:hover, .receive-display-picker button.selected { background: #263f31; color: #c6e6cf; }
 .receive-display-picker button.selected { border-color: #263f31; }
+.receive-display-picker button + button { border-left-color: #35434a; }
 .icon-button { width: 25px; height: 25px; padding: 0; font-size: 12px; }
 .log { min-height: 0; overflow: auto; padding: 3px 0; }
 .log-jump-bottom { position: sticky; right: 12px; bottom: 10px; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; margin: -38px 12px 10px auto; border: 1px solid #35434a; border-radius: 50%; background: #1d292d; color: #b6c5c8; box-shadow: 0 4px 12px rgb(0 0 0 / 22%); }
@@ -566,6 +567,7 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .app-shell[data-theme="light"] .receive-display-picker button { border-color: #bdcbcf; background: #f2f6f7; color: #536a71; }
 .app-shell[data-theme="light"] .receive-display-picker button:hover, .app-shell[data-theme="light"] .receive-display-picker button.selected { background: #e7f5eb; color: #1e7044; }
 .app-shell[data-theme="light"] .receive-display-picker button.selected { border-color: #e7f5eb; }
+.app-shell[data-theme="light"] .receive-display-picker button + button { border-left-color: #bdcbcf; }
 .app-shell[data-theme="light"] .wave-plot { background: #f8fbfb; }
 .app-shell[data-theme="light"] .wave-axis { border-color: #b9c7cb; background: #f8fbfb; }
 .app-shell[data-theme="light"] .wave-viewport:focus { outline-color: rgb(45 133 81 / 58%); }
