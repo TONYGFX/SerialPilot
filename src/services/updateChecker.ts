@@ -4,7 +4,7 @@
  * deliberately excluded because it is not a release manifest for end users.
  */
 
-import { LATEST_RELEASE_API_URLS, PROJECT_RELEASES_URL } from "../appInfo";
+import { LATEST_RELEASE_API_URLS, PROJECT_LATEST_RELEASE_URL } from "../appInfo";
 
 export type ReleaseInfo = {
   version: string;
@@ -92,7 +92,8 @@ function parseRelease(value: unknown): ReleaseInfo {
   if (!version) throw new Error("Release tag is not a semantic version");
   return {
     version,
-    releaseUrl: typeof value.html_url === "string" ? value.html_url : PROJECT_RELEASES_URL,
+    // Gitea identifies the available version, while the update action always opens GitHub.
+    releaseUrl: PROJECT_LATEST_RELEASE_URL,
     publishedAt: typeof value.published_at === "string" ? value.published_at : undefined,
   };
 }
