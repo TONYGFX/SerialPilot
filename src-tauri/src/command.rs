@@ -1583,60 +1583,62 @@ async fn stream_file(
     let mut sent_bytes = 0u64;
     let mut buffer = vec![0u8; chunk_size];
     let cursor = state.lock().await.next_cursor.saturating_sub(1);
-    if protocol != FileTransferProtocol::Null {
+    let integrity = if protocol == FileTransferProtocol::Null {
+        PacketIntegrity::Crc16
+    } else {
         if let Some(control) = file_transfer_control {
             let _ = control
                 .send(FileTransferControl::Send(protocol.clone()))
                 .await;
         }
-        if wait_for_control(
+        let accepted_handshake = if protocol == FileTransferProtocol::Xmodem {
+            &[XMODEM_NAK, XMODEM_CRC_REQUEST][..]
+        } else {
+            &[XMODEM_CRC_REQUEST][..]
+        };
+        let Some((_, handshake)) = wait_for_control(
             state,
             changed,
             cancel,
             action_id,
             cursor,
             timeout_ms,
-            &[0x15, 0x43],
+            accepted_handshake,
         )
         .await
-        .is_none()
-        {
+        else {
             return Err((0, cancellation_requested(cancel, action_id).await));
-        }
+        };
+        let integrity = if handshake == XMODEM_NAK {
+            PacketIntegrity::Checksum8
+        } else {
+            PacketIntegrity::Crc16
+        };
         if protocol == FileTransferProtocol::Ymodem {
             let mut header = vec![0u8; 128];
             let name = file_path.rsplit(['/', '\\']).next().unwrap_or("file.bin");
             let metadata = format!("{}\0{}\0", name, file_size);
             header[..metadata.len().min(128)]
                 .copy_from_slice(&metadata.as_bytes()[..metadata.len().min(128)]);
-            let frame = xmodem_frame(0, &header, false);
-            let before = state.lock().await.next_cursor.saturating_sub(1);
-            send_wire(
+            let frame = xmodem_frame(0, &header, false, PacketIntegrity::Crc16);
+            if !send_ymodem_header(
                 &frame,
                 outgoing.clone(),
                 state,
                 events,
                 audit,
                 changed,
-                timeout_ms,
-            )
-            .await?;
-            if wait_for_control_sequence(
-                state,
-                changed,
                 cancel,
                 action_id,
-                before,
                 timeout_ms,
-                &[XMODEM_ACK, XMODEM_CRC_REQUEST],
             )
-            .await
-            .is_none()
+            .await?
             {
                 return Err((0, cancellation_requested(cancel, action_id).await));
             }
         }
-    }
+        integrity
+    };
     let mut sequence = 1u8;
     loop {
         if cancel.lock().await.as_deref() == Some(action_id) {
@@ -1652,41 +1654,40 @@ async fn stream_file(
         let chunk = buffer[..read].to_vec();
         let wire = match protocol {
             FileTransferProtocol::Null => chunk.clone(),
-            FileTransferProtocol::Xmodem => xmodem_frame(sequence, &chunk, false),
+            FileTransferProtocol::Xmodem => xmodem_frame(sequence, &chunk, false, integrity),
             FileTransferProtocol::Xmodem1k | FileTransferProtocol::Ymodem => {
-                xmodem_frame(sequence, &chunk, true)
+                xmodem_frame(sequence, &chunk, true, PacketIntegrity::Crc16)
             }
         };
         if cancellation_requested(cancel, action_id).await {
             return Err((sent_bytes, true));
         }
-        let before = state.lock().await.next_cursor.saturating_sub(1);
-        send_wire(
-            &wire,
-            outgoing.clone(),
-            state,
-            events,
-            audit,
-            changed,
-            timeout_ms,
-        )
-        .await?;
         if protocol != FileTransferProtocol::Null {
-            if wait_for_control(
+            send_with_ack_retry(
+                &wire,
+                outgoing.clone(),
                 state,
                 changed,
                 cancel,
                 action_id,
-                before,
+                events,
+                audit,
                 timeout_ms,
-                &[0x06],
             )
             .await
-            .is_none()
-            {
-                return Err((sent_bytes, cancellation_requested(cancel, action_id).await));
-            }
+            .map_err(|cancelled| (sent_bytes, cancelled))?;
             sequence = sequence.wrapping_add(1);
+        } else {
+            send_wire(
+                &wire,
+                outgoing.clone(),
+                state,
+                events,
+                audit,
+                changed,
+                timeout_ms,
+            )
+            .await?;
         }
         sent_bytes += read as u64;
         emit_file_progress(
@@ -1719,29 +1720,19 @@ async fn stream_file(
     if protocol != FileTransferProtocol::Null {
         let eot = [0x04];
         let before = state.lock().await.next_cursor.saturating_sub(1);
-        send_wire(
+        send_with_ack_retry(
             &eot,
             outgoing.clone(),
-            state,
-            events,
-            audit,
-            changed,
-            timeout_ms,
-        )
-        .await?;
-        let Some((_eot_ack_cursor, _)) = wait_for_control(
             state,
             changed,
             cancel,
             action_id,
-            before,
+            events,
+            audit,
             timeout_ms,
-            &[0x06],
         )
         .await
-        else {
-            return Err((sent_bytes, cancellation_requested(cancel, action_id).await));
-        };
+        .map_err(|cancelled| (sent_bytes, cancelled))?;
         if protocol == FileTransferProtocol::Ymodem {
             // Ymodem terminates with a zeroed block 0 after the receiver's
             // post-EOT CRC request; without this packet receivers discard the
@@ -1760,26 +1751,12 @@ async fn stream_file(
             {
                 return Err((sent_bytes, cancellation_requested(cancel, action_id).await));
             }
-            let end_frame = xmodem_frame(0, &[0; 128], false);
-            let end_before = state.lock().await.next_cursor.saturating_sub(1);
-            send_wire(
-                &end_frame, outgoing, state, events, audit, changed, timeout_ms,
-            )
-            .await?;
-            if wait_for_control(
-                state,
-                changed,
-                cancel,
-                action_id,
-                end_before,
-                timeout_ms,
-                &[0x06],
+            let end_frame = xmodem_frame(0, &[0; 128], false, PacketIntegrity::Crc16);
+            send_with_ack_retry(
+                &end_frame, outgoing, state, changed, cancel, action_id, events, audit, timeout_ms,
             )
             .await
-            .is_none()
-            {
-                return Err((sent_bytes, cancellation_requested(cancel, action_id).await));
-            }
+            .map_err(|cancelled| (sent_bytes, cancelled))?;
         }
     }
     if cancellation_requested(cancel, action_id).await {
@@ -1809,10 +1786,19 @@ const XMODEM_EOT: u8 = 0x04;
 const XMODEM_ACK: u8 = 0x06;
 const XMODEM_NAK: u8 = 0x15;
 const XMODEM_CRC_REQUEST: u8 = 0x43;
+const XMODEM_CAN: u8 = 0x18;
+const MAX_FILE_TRANSFER_RETRIES: u8 = 10;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PacketIntegrity {
+    Crc16,
+    Checksum8,
+}
 
 enum ReceivedPacket {
     Data { sequence: u8, payload: Vec<u8> },
     EndOfTransfer,
+    Cancelled,
     Invalid,
 }
 
@@ -1856,6 +1842,8 @@ async fn receive_file_stream(
     let mut next_cursor = cursor;
     let handshake_deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
     let mut waiting_for_first_packet = true;
+    let mut integrity = PacketIntegrity::Crc16;
+    let mut checksum_requested = false;
     let mut expected_sequence: u8 = if protocol == FileTransferProtocol::Ymodem {
         0
     } else {
@@ -1887,14 +1875,16 @@ async fn receive_file_stream(
             wait_for_rx_bytes(state, changed, cancel, action_id, next_cursor, wait_timeout).await
         else {
             if waiting_for_first_packet {
+                let handshake = if protocol == FileTransferProtocol::Xmodem && !checksum_requested {
+                    // Older Xmodem peers ignore `C` and start only after NAK.
+                    checksum_requested = true;
+                    integrity = PacketIntegrity::Checksum8;
+                    XMODEM_NAK
+                } else {
+                    handshake_byte(integrity)
+                };
                 if send_receive_control(
-                    XMODEM_CRC_REQUEST,
-                    &outgoing,
-                    state,
-                    events,
-                    audit,
-                    changed,
-                    timeout_ms,
+                    handshake, &outgoing, state, events, audit, changed, timeout_ms,
                 )
                 .await
                 .is_err()
@@ -1909,7 +1899,7 @@ async fn receive_file_stream(
         };
         next_cursor = frame_cursor;
         parser.extend(bytes);
-        while let Some(packet) = take_received_packet(&mut parser) {
+        while let Some(packet) = take_received_packet(&mut parser, integrity) {
             waiting_for_first_packet = false;
             match packet {
                 ReceivedPacket::Invalid => {
@@ -1960,6 +1950,10 @@ async fn receive_file_stream(
                     awaiting_ymodem_end = true;
                     expected_sequence = 0;
                 }
+                ReceivedPacket::Cancelled => {
+                    cleanup_partial_file(part_path.as_deref()).await;
+                    return receive_failed(progress, "发送端已取消传输");
+                }
                 ReceivedPacket::Data { sequence, payload } => {
                     if sequence == expected_sequence.wrapping_sub(1) {
                         let _ = send_receive_control(
@@ -1974,6 +1968,10 @@ async fn receive_file_stream(
                             XMODEM_NAK, &outgoing, state, events, audit, changed, timeout_ms,
                         )
                         .await;
+                        if invalid_packets >= MAX_FILE_TRANSFER_RETRIES {
+                            cleanup_partial_file(part_path.as_deref()).await;
+                            return receive_failed(progress, "连续数据包序号校验失败");
+                        }
                         continue;
                     }
                     invalid_packets = 0;
@@ -2232,11 +2230,26 @@ fn parse_ymodem_header(payload: &[u8]) -> Option<(String, u64)> {
     (!file_name.is_empty()).then_some((safe_receive_name(&file_name), file_size))
 }
 
-fn take_received_packet(buffer: &mut Vec<u8>) -> Option<ReceivedPacket> {
+fn take_received_packet(
+    buffer: &mut Vec<u8>,
+    integrity: PacketIntegrity,
+) -> Option<ReceivedPacket> {
     let marker_index = buffer
         .iter()
-        .position(|byte| matches!(*byte, XMODEM_SOH | XMODEM_STX | XMODEM_EOT))?;
+        .position(|byte| matches!(*byte, XMODEM_SOH | XMODEM_STX | XMODEM_EOT | XMODEM_CAN))?;
     buffer.drain(..marker_index);
+    if buffer.first() == Some(&XMODEM_CAN) {
+        if buffer.len() < 2 {
+            return None;
+        }
+        let cancelled = buffer[1] == XMODEM_CAN;
+        buffer.drain(..2);
+        return Some(if cancelled {
+            ReceivedPacket::Cancelled
+        } else {
+            ReceivedPacket::Invalid
+        });
+    }
     if buffer.first() == Some(&XMODEM_EOT) {
         buffer.remove(0);
         return Some(ReceivedPacket::EndOfTransfer);
@@ -2246,16 +2259,26 @@ fn take_received_packet(buffer: &mut Vec<u8>) -> Option<ReceivedPacket> {
     } else {
         128
     };
-    let packet_size = payload_size + 5;
+    let integrity_size = match integrity {
+        PacketIntegrity::Crc16 => 2,
+        PacketIntegrity::Checksum8 => 1,
+    };
+    let packet_size = payload_size + 3 + integrity_size;
     if buffer.len() < packet_size {
         return None;
     }
     let packet: Vec<_> = buffer.drain(..packet_size).collect();
     let sequence = packet[1];
     let valid_sequence = packet[2] == 255 - sequence;
-    let expected_crc = u16::from_be_bytes([packet[packet_size - 2], packet[packet_size - 1]]);
-    let payload = packet[3..packet_size - 2].to_vec();
-    if !valid_sequence || crc16(&payload) != expected_crc {
+    let payload = packet[3..packet_size - integrity_size].to_vec();
+    let valid_integrity = match integrity {
+        PacketIntegrity::Crc16 => {
+            let expected = u16::from_be_bytes([packet[packet_size - 2], packet[packet_size - 1]]);
+            crc16(&payload) == expected
+        }
+        PacketIntegrity::Checksum8 => checksum8(&payload) == packet[packet_size - 1],
+    };
+    if !valid_sequence || !valid_integrity {
         return Some(ReceivedPacket::Invalid);
     }
     Some(ReceivedPacket::Data { sequence, payload })
@@ -2345,6 +2368,97 @@ async fn send_wire(
     record_event(events, audit, frame_event(frame, EventKind::FileFrame));
     changed.notify_waiters();
     Ok(())
+}
+
+async fn send_with_ack_retry(
+    bytes: &[u8],
+    outgoing: tokio::sync::mpsc::Sender<Vec<u8>>,
+    state: &Arc<Mutex<State>>,
+    changed: &Arc<Notify>,
+    cancel: &Arc<Mutex<Option<String>>>,
+    action_id: &str,
+    events: &broadcast::Sender<SerialEvent>,
+    audit: &Arc<std::sync::Mutex<VecDeque<SerialEvent>>>,
+    timeout_ms: u64,
+) -> Result<(), bool> {
+    // X/Ymodem retransmit the same sequence number after NAK or a lost ACK.
+    for _ in 0..MAX_FILE_TRANSFER_RETRIES {
+        if cancellation_requested(cancel, action_id).await {
+            return Err(true);
+        }
+        let before = state.lock().await.next_cursor.saturating_sub(1);
+        send_wire(
+            bytes,
+            outgoing.clone(),
+            state,
+            events,
+            audit,
+            changed,
+            timeout_ms,
+        )
+        .await
+        .map_err(|error| error.1)?;
+        match wait_for_control(
+            state,
+            changed,
+            cancel,
+            action_id,
+            before,
+            timeout_ms,
+            &[XMODEM_ACK, XMODEM_NAK],
+        )
+        .await
+        {
+            Some((_, XMODEM_ACK)) => return Ok(()),
+            Some((_, XMODEM_NAK)) | None => continue,
+            Some(_) => unreachable!("only requested controls can be returned"),
+        }
+    }
+    Err(cancellation_requested(cancel, action_id).await)
+}
+
+async fn send_ymodem_header(
+    bytes: &[u8],
+    outgoing: tokio::sync::mpsc::Sender<Vec<u8>>,
+    state: &Arc<Mutex<State>>,
+    events: &broadcast::Sender<SerialEvent>,
+    audit: &Arc<std::sync::Mutex<VecDeque<SerialEvent>>>,
+    changed: &Arc<Notify>,
+    cancel: &Arc<Mutex<Option<String>>>,
+    action_id: &str,
+    timeout_ms: u64,
+) -> Result<bool, (u64, bool)> {
+    for _ in 0..MAX_FILE_TRANSFER_RETRIES {
+        if cancellation_requested(cancel, action_id).await {
+            return Ok(false);
+        }
+        let before = state.lock().await.next_cursor.saturating_sub(1);
+        send_wire(
+            bytes,
+            outgoing.clone(),
+            state,
+            events,
+            audit,
+            changed,
+            timeout_ms,
+        )
+        .await?;
+        if wait_for_control_sequence(
+            state,
+            changed,
+            cancel,
+            action_id,
+            before,
+            timeout_ms,
+            &[XMODEM_ACK, XMODEM_CRC_REQUEST],
+        )
+        .await
+        .is_some()
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 async fn wait_for_control(
@@ -2464,7 +2578,7 @@ async fn wait_between_chunks(
     }
 }
 
-fn xmodem_frame(sequence: u8, payload: &[u8], large: bool) -> Vec<u8> {
+fn xmodem_frame(sequence: u8, payload: &[u8], large: bool, integrity: PacketIntegrity) -> Vec<u8> {
     let (marker, size) = if large { (0x02, 1024) } else { (0x01, 128) };
     let mut frame = vec![marker, sequence, 255 - sequence];
     frame.extend(
@@ -2474,9 +2588,25 @@ fn xmodem_frame(sequence: u8, payload: &[u8], large: bool) -> Vec<u8> {
             .chain(std::iter::repeat(0x1a))
             .take(size),
     );
-    let crc = crc16(&frame[3..]);
-    frame.extend([(crc >> 8) as u8, crc as u8]);
+    match integrity {
+        PacketIntegrity::Crc16 => {
+            let crc = crc16(&frame[3..]);
+            frame.extend([(crc >> 8) as u8, crc as u8]);
+        }
+        PacketIntegrity::Checksum8 => frame.push(checksum8(&frame[3..])),
+    }
     frame
+}
+
+fn handshake_byte(integrity: PacketIntegrity) -> u8 {
+    match integrity {
+        PacketIntegrity::Crc16 => XMODEM_CRC_REQUEST,
+        PacketIntegrity::Checksum8 => XMODEM_NAK,
+    }
+}
+
+fn checksum8(bytes: &[u8]) -> u8 {
+    bytes.iter().fold(0u8, |sum, byte| sum.wrapping_add(*byte))
 }
 
 fn crc16(bytes: &[u8]) -> u16 {
@@ -2734,6 +2864,26 @@ mod tests {
                 .expect("supported text charset identifier");
             assert_eq!(parsed, expected);
         }
+    }
+
+    #[test]
+    fn xmodem_packets_support_crc_and_checksum_integrity() {
+        for integrity in [PacketIntegrity::Crc16, PacketIntegrity::Checksum8] {
+            let mut packet = xmodem_frame(7, b"SerialPilot", false, integrity);
+            assert!(matches!(
+                take_received_packet(&mut packet, integrity),
+                Some(ReceivedPacket::Data { sequence: 7, payload }) if payload.starts_with(b"SerialPilot")
+            ));
+        }
+    }
+
+    #[test]
+    fn xmodem_double_can_cancels_a_receive() {
+        let mut bytes = vec![XMODEM_CAN, XMODEM_CAN];
+        assert!(matches!(
+            take_received_packet(&mut bytes, PacketIntegrity::Crc16),
+            Some(ReceivedPacket::Cancelled)
+        ));
     }
 
     async fn open(core: &SerialCore) -> (String, u64) {
