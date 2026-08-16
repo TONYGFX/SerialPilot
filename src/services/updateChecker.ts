@@ -1,10 +1,10 @@
 /**
- * Checks the public GitHub release channel without downloading or installing anything.
- * The local LAN Gitea activity feed is deliberately not used because it is not a
- * stable, publicly reachable release manifest for end users.
+ * Checks public Gitea releases first, then falls back to GitHub without downloading anything.
+ * Both sources expose the stable release API; the local LAN activity RSS feed is
+ * deliberately excluded because it is not a release manifest for end users.
  */
 
-import { LATEST_RELEASE_API_URL, PROJECT_RELEASES_URL } from "../appInfo";
+import { LATEST_RELEASE_API_URLS, PROJECT_RELEASES_URL } from "../appInfo";
 
 export type ReleaseInfo = {
   version: string;
@@ -33,7 +33,7 @@ type VersionParts = {
 };
 
 /**
- * Queries GitHub for the latest stable SerialPilot release.
+ * Queries the configured public release channels for the latest stable release.
  *
  * @param currentVersion Version bundled with the running application.
  * @param fetchRelease Injectable request function used by tests.
@@ -41,14 +41,23 @@ type VersionParts = {
  * @throws When the release service cannot provide a valid stable release.
  */
 export async function checkForUpdate(currentVersion: string, fetchRelease: ReleaseFetcher = fetch): Promise<UpdateCheckResult> {
-  const response = await fetchRelease(LATEST_RELEASE_API_URL, {
-    headers: { Accept: "application/vnd.github+json" },
-    cache: "no-store",
-  });
-  if (!response.ok) throw new Error(`Release service returned HTTP ${response.status}`);
+  let lastFailure: unknown;
+  for (const releaseApiUrl of LATEST_RELEASE_API_URLS) {
+    try {
+      const release = await fetchLatestRelease(releaseApiUrl, fetchRelease);
+      return { available: compareVersions(release.version, currentVersion) > 0, release };
+    } catch (cause) {
+      lastFailure = cause;
+    }
+  }
+  throw lastFailure instanceof Error ? lastFailure : new Error("No release channel is available");
+}
 
+async function fetchLatestRelease(releaseApiUrl: string, fetchRelease: ReleaseFetcher): Promise<ReleaseInfo> {
+  const response = await fetchRelease(releaseApiUrl, { headers: { Accept: "application/json" }, cache: "no-store" });
+  if (!response.ok) throw new Error(`Release service returned HTTP ${response.status}`);
   const release = parseRelease(await response.json());
-  return { available: compareVersions(release.version, currentVersion) > 0, release };
+  return release;
 }
 
 /**

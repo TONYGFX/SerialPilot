@@ -5,6 +5,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import { GITEA_LATEST_RELEASE_API_URL, GITHUB_LATEST_RELEASE_API_URL } from "../appInfo";
 import { checkForUpdate, compareVersions, type ReleaseFetcher } from "./updateChecker";
 
 function releaseFetcher(body: unknown): ReleaseFetcher {
@@ -20,6 +21,19 @@ describe("updateChecker", () => {
   it("does not offer the running release as an update", async () => {
     const result = await checkForUpdate("0.1.2", releaseFetcher({ tag_name: "0.1.2", html_url: "https://example.test/release" }));
     expect(result.available).toBe(false);
+  });
+
+  it("falls back to GitHub when the primary Gitea endpoint is unavailable", async () => {
+    const requestedUrls: string[] = [];
+    const fetchRelease: ReleaseFetcher = async (url) => {
+      requestedUrls.push(url);
+      if (url === GITEA_LATEST_RELEASE_API_URL) return { ok: false, status: 503, json: async () => ({}) };
+      return { ok: true, status: 200, json: async () => ({ tag_name: "0.1.3", html_url: "https://example.test/release" }) };
+    };
+
+    const result = await checkForUpdate("0.1.2", fetchRelease);
+    expect(result.available).toBe(true);
+    expect(requestedUrls).toEqual([GITEA_LATEST_RELEASE_API_URL, GITHUB_LATEST_RELEASE_API_URL]);
   });
 
   it("orders a final release after its prerelease", () => {
