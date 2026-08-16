@@ -267,10 +267,12 @@ select, input:not([type="checkbox"]) { height: 31px; padding: 0 8px; }
 .log-head, .composer-head { display: flex; align-items: center; justify-content: space-between; min-height: 40px; padding: 0 14px; border-bottom: 1px solid #2b373c; }
 .log-head span { color: #718189; font: 10px var(--serial-mono-font); }
 .log-actions { display: flex; align-items: center; gap: 7px; }
-.receive-display-picker { display: inline-flex; align-items: stretch; align-self: center; box-sizing: border-box; height: 25px; border: 1px solid #35434a; border-radius: 2px; overflow: hidden; }
-.receive-display-picker button { display: inline-flex; align-items: center; justify-content: center; height: 23px; padding: 0 7px; border: 0; border-right: 1px solid #35434a; background: #1d292d; color: #839398; font-size: 9px; line-height: 1; }
-.receive-display-picker button:last-child { border-right: 0; }
+.receive-display-picker { display: inline-flex; align-items: stretch; align-self: center; box-sizing: border-box; height: 25px; border: 0; border-radius: 2px; overflow: visible; }
+.receive-display-picker button { display: inline-flex; align-items: center; justify-content: center; height: 25px; padding: 0 7px; border: 1px solid #35434a; border-right: 0; background: #1d292d; color: #839398; font-size: 9px; line-height: 1; }
+.receive-display-picker button:first-child { border-radius: 2px 0 0 2px; }
+.receive-display-picker button:last-child { border-right: 1px solid #35434a; border-radius: 0 2px 2px 0; }
 .receive-display-picker button:hover, .receive-display-picker button.selected { background: #263f31; color: #c6e6cf; }
+.receive-display-picker button.selected { border-color: #263f31; }
 .icon-button { width: 25px; height: 25px; padding: 0; font-size: 12px; }
 .log { min-height: 0; overflow: auto; padding: 3px 0; }
 .log-jump-bottom { position: sticky; right: 12px; bottom: 10px; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; margin: -38px 12px 10px auto; border: 1px solid #35434a; border-radius: 50%; background: #1d292d; color: #b6c5c8; box-shadow: 0 4px 12px rgb(0 0 0 / 22%); }
@@ -294,8 +296,6 @@ code { overflow: hidden; color: #d7e5e0; font: 11px var(--serial-mono-font); tex
 .segmented button { min-width: 43px; padding: 5px 7px; border: 0; border-right: 1px solid #35434a; background: #141b1f; color: #91a0a6; font-size: 10px; }
 .segmented button:last-child { border-right: 0; }
 .segmented .selected { background: #263f31; color: #b5e4c1; }
-.composer-head .segmented { align-items: stretch; height: 31px; }
-.composer-head .segmented button { display: inline-flex; align-items: center; justify-content: center; height: 100%; padding: 0 7px; }
 textarea { display: block; width: 100%; min-height: 0; height: auto; resize: none; border-radius: 0; padding: 9px 14px; font: 11px var(--serial-mono-font); }
 .settings > .file-settings { flex: 1 1 0%; }
 .file-settings { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr) auto; gap: 8px; min-width: 0; min-height: 0; }
@@ -563,9 +563,9 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .app-shell[data-theme="light"] .file-open:hover { border-color: #4f9e69; background: #dff2e5; color: #1b5c35; }
 .app-shell[data-theme="light"] .file-dismiss-countdown { background: #718990; color: #fff; }
 .app-shell[data-theme="light"] .receive-directory code { border-color: #bdcbcf; background: #f7fafb; color: #587078; }
-.app-shell[data-theme="light"] .receive-display-picker { border-color: #bdcbcf; }
 .app-shell[data-theme="light"] .receive-display-picker button { border-color: #bdcbcf; background: #f2f6f7; color: #536a71; }
 .app-shell[data-theme="light"] .receive-display-picker button:hover, .app-shell[data-theme="light"] .receive-display-picker button.selected { background: #e7f5eb; color: #1e7044; }
+.app-shell[data-theme="light"] .receive-display-picker button.selected { border-color: #e7f5eb; }
 .app-shell[data-theme="light"] .wave-plot { background: #f8fbfb; }
 .app-shell[data-theme="light"] .wave-axis { border-color: #b9c7cb; background: #f8fbfb; }
 .app-shell[data-theme="light"] .wave-viewport:focus { outline-color: rgb(45 133 81 / 58%); }
