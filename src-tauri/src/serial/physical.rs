@@ -23,6 +23,7 @@ use crate::{
 };
 
 const RX_IDLE_FRAME_TIMEOUT: Duration = Duration::from_millis(15);
+const TX_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_RX_FRAME_BYTES: usize = 4096;
 
 #[derive(Default)]
@@ -56,7 +57,7 @@ impl SerialAdapter for PhysicalSerialAdapter {
             .parity(parse_parity(&config.parity)?)
             .stop_bits(parse_stop_bits(config.stop_bits)?)
             .flow_control(parse_flow_control(&config.flow_control)?)
-            .timeout(RX_IDLE_FRAME_TIMEOUT)
+            .timeout(TX_WRITE_TIMEOUT)
             .open()
             .map_err(|error| {
                 CoreError::Adapter(format!("unable to open {}: {error}", config.port))
@@ -69,7 +70,10 @@ impl SerialAdapter for PhysicalSerialAdapter {
             port.write_request_to_send(true).map_err(adapter_error)?;
         }
 
-        let read_port = port.try_clone().map_err(adapter_error)?;
+        let mut read_port = port.try_clone().map_err(adapter_error)?;
+        read_port
+            .set_timeout(RX_IDLE_FRAME_TIMEOUT)
+            .map_err(adapter_error)?;
         let (outgoing, mut writes) = mpsc::channel::<Vec<u8>>(64);
         let (incoming_tx, incoming) = mpsc::channel::<Vec<u8>>(64);
         let shutdown = Arc::new(AtomicBool::new(false));
@@ -87,9 +91,9 @@ impl SerialAdapter for PhysicalSerialAdapter {
                 if write_port.write_all(&payload).is_err() {
                     break;
                 }
-                if write_port.flush().is_err() {
-                    break;
-                }
+                // SerialPort writes are ordered by the operating-system driver. Waiting
+                // for every byte to drain here can time out under load and incorrectly
+                // close the writer before a protocol retry can be sent.
             }
         });
         Ok(AdapterConnection {
@@ -244,5 +248,10 @@ mod tests {
         pending.extend_from_slice(b"1231231");
         pending.extend_from_slice(b"2");
         assert_eq!(pending, b"12312312");
+    }
+
+    #[test]
+    fn writer_timeout_allows_more_time_than_read_framing() {
+        assert!(TX_WRITE_TIMEOUT > RX_IDLE_FRAME_TIMEOUT);
     }
 }
