@@ -57,12 +57,10 @@ pub enum DataEncoding {
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum TextCharset {
-    #[serde(rename = "utf-8", alias = "utf8")]
     #[default]
     Utf8,
     Gbk,
     Ascii,
-    #[serde(rename = "utf-16le", alias = "utf16le")]
     Utf16le,
 }
 
@@ -2716,24 +2714,6 @@ mod tests {
 
     fn core() -> SerialCore {
         SerialCore::new(Arc::new(MockSerialAdapter))
-    }
-
-    #[test]
-    fn text_charset_accepts_ui_and_legacy_identifiers() {
-        let cases = [
-            ("utf-8", TextCharset::Utf8),
-            ("utf8", TextCharset::Utf8),
-            ("gbk", TextCharset::Gbk),
-            ("ascii", TextCharset::Ascii),
-            ("utf-16le", TextCharset::Utf16le),
-            ("utf16le", TextCharset::Utf16le),
-        ];
-
-        for (identifier, expected) in cases {
-            let parsed: TextCharset = serde_json::from_value(serde_json::json!(identifier))
-                .expect("supported text charset identifier");
-            assert_eq!(parsed, expected);
-        }
     }
 
     async fn open(core: &SerialCore) -> (String, u64) {
