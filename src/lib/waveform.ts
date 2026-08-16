@@ -11,6 +11,7 @@ export type ChartViewport = {
   width: number;
   height: number;
   timeRange?: { originMs: number; startMs: number; endMs: number };
+  valueRange?: { min: number; max: number };
 };
 
 export type ChartPoint = { x: number; y: number; sample: WaveSample };
@@ -43,6 +44,7 @@ export type WaveChart = {
 const NUMERIC_VALUE = /^[+-]?(?:\d+\.?\d*|\.\d+)$/;
 const LATEST_POINT_CLEARANCE = 16;
 const FOOTER_SAFE_HEIGHT = 64;
+const GRID_SPACING_PX = 110;
 
 /**
  * Captures named values from one decoded RX frame.
@@ -92,7 +94,7 @@ export function limitSamplesPerChannel(samples: WaveSample[], maximumPerChannel:
  */
 export function buildWaveChart(samples: WaveSample[], channels: WaveChannel[], viewport: ChartViewport): WaveChart {
   const geometry = createChartGeometry(viewport);
-  const range = getValueRange(samples);
+  const range = getValueRange(samples, viewport.valueRange);
   const timeRange = getTimeRange(samples, viewport.timeRange);
   const series = channels
     .filter((channel) => channel.enabled)
@@ -127,7 +129,8 @@ function parseNamedValues(text: string): Map<string, number> | undefined {
   return values.size > 0 ? values : undefined;
 }
 
-function getValueRange(samples: WaveSample[]): { min: number; max: number } {
+function getValueRange(samples: WaveSample[], requested?: ChartViewport["valueRange"]): { min: number; max: number } {
+  if (requested && Number.isFinite(requested.min) && Number.isFinite(requested.max) && requested.max > requested.min) return requested;
   const values = samples.map((sample) => sample.value);
   const rawMin = values.length > 0 ? Math.min(...values) : 0;
   const rawMax = values.length > 0 ? Math.max(...values) : 200;
@@ -183,19 +186,52 @@ function sampleToPoint(sample: WaveSample, min: number, max: number, timeRange: 
 }
 
 function createHorizontalGrid(min: number, max: number, geometry: Pick<WaveChart, "top" | "plotHeight">): Array<{ y: number; label: string }> {
-  return Array.from({ length: 6 }, (_, index) => {
-    const ratio = index / 5;
-    return { y: geometry.top + ratio * geometry.plotHeight, label: formatWaveValue(max - ratio * (max - min)) };
-  });
+  const step = findNiceStep((max - min) / Math.max(1, geometry.plotHeight) * GRID_SPACING_PX);
+  const first = Math.ceil(min / step) * step;
+  const lines: Array<{ y: number; label: string }> = [];
+  for (let value = first; value <= max + step / 1_000 && lines.length < 100; value += step) {
+    const ratio = (max - value) / (max - min);
+    lines.push({ y: geometry.top + ratio * geometry.plotHeight, label: formatWaveValue(value) });
+  }
+  return lines;
 }
 
 function createVerticalGrid(timeRange: { originMs: number; startMs: number; endMs: number }, geometry: Pick<WaveChart, "left" | "plotWidth">): Array<{ x: number; label: string }> {
-  const divisions = 8;
-  return Array.from({ length: divisions + 1 }, (_, index) => {
-    const ratio = index / divisions;
-    const timestampMs = timeRange.startMs + ratio * (timeRange.endMs - timeRange.startMs);
-    return { x: geometry.left + ratio * geometry.plotWidth, label: formatElapsedTime(timestampMs - timeRange.originMs) };
-  });
+  const duration = timeRange.endMs - timeRange.startMs;
+  const step = findNiceStep(duration / Math.max(1, geometry.plotWidth) * GRID_SPACING_PX);
+  const firstElapsed = Math.ceil((timeRange.startMs - timeRange.originMs) / step) * step;
+  const lastElapsed = timeRange.endMs - timeRange.originMs;
+  const lines: Array<{ x: number; label: string }> = [];
+  for (let elapsed = firstElapsed; elapsed <= lastElapsed + step / 1_000 && lines.length < 100; elapsed += step) {
+    const timestampMs = timeRange.originMs + elapsed;
+    const ratio = (timestampMs - timeRange.startMs) / duration;
+    lines.push({ x: geometry.left + ratio * geometry.plotWidth, label: formatElapsedTime(elapsed) });
+  }
+  return lines;
+}
+
+/**
+ * Chooses a 1/2/5 decimal increment near the requested screen-space interval.
+ * Keeping this increment independent of viewport dimensions prevents resize
+ * operations from silently changing the apparent chart scale.
+ */
+function findNiceStep(rawStep: number): number {
+  const magnitude = 10 ** Math.floor(Math.log10(Math.max(rawStep, Number.MIN_VALUE)));
+  const normalized = rawStep / magnitude;
+  if (normalized <= 1) return magnitude;
+  if (normalized <= 2) return 2 * magnitude;
+  if (normalized <= 5) return 5 * magnitude;
+  return 10 * magnitude;
+}
+
+/**
+ * Returns the drawable size after axes, labels and marker clearance.
+ * Consumers use it to preserve data-units per pixel while their container
+ * grows or shrinks.
+ */
+export function getWavePlotDimensions(viewport: Pick<ChartViewport, "width" | "height">): { width: number; height: number } {
+  const geometry = createChartGeometry(viewport);
+  return { width: geometry.plotWidth, height: geometry.plotHeight };
 }
 
 /** Formats elapsed monitoring time for the X axis and point inspection. */

@@ -19,7 +19,7 @@ import {
 import { save } from "@tauri-apps/plugin-dialog";
 import { Icon } from "./Icon";
 import { saveTextFile } from "../services/serialClient";
-import { buildWaveChart, formatElapsedTime, formatWaveValue, type ChartPoint, type WaveChart } from "../lib/waveform";
+import { buildWaveChart, formatElapsedTime, formatWaveValue, getWavePlotDimensions, type ChartPoint, type WaveChart } from "../lib/waveform";
 import type { WaveChannel, WaveSample, WaveformSettings } from "../types/waveform";
 
 type WaveformPanelProps = {
@@ -39,11 +39,14 @@ const DEFAULT_SETTINGS: WaveformSettings = { showLatestMarker: true };
 const CHANNEL_COLORS = ["#61d792", "#5fc7dd", "#e8ba61", "#df7aa4", "#a8a6ee", "#d9935d"];
 const WAVE_AXIS_WIDTH = 58;
 const WAVE_TOOLBAR_HEIGHT = 54;
-const MIN_TIME_WINDOW_MS = 1_000;
-const MAX_TIME_WINDOW_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_TIME_SCALE_MS_PER_PIXEL = 12;
+const MIN_TIME_SCALE_MS_PER_PIXEL = 0.5;
+const MAX_TIME_SCALE_MS_PER_PIXEL = 864_000;
+const DEFAULT_VALUE_CENTER = 0;
+const DEFAULT_VALUE_UNITS_PER_PIXEL = 0.5;
 
 /**
- * Draws configured channels using an aspect-correct SVG viewport.
+ * Draws configured channels using stable data-units-per-pixel viewports.
  *
  * @param props Channel configuration, serial-derived samples and user actions.
  * @returns The waveform workspace panel.
@@ -56,24 +59,30 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
   const [settings, setSettings] = useState<WaveformSettings>(DEFAULT_SETTINGS);
   const [openMenu, setOpenMenu] = useState<OpenMenu>();
   const [dragging, setDragging] = useState(false);
-  const [timeWindowMs, setTimeWindowMs] = useState(10_000);
+  const [timeScaleMsPerPixel, setTimeScaleMsPerPixel] = useState(DEFAULT_TIME_SCALE_MS_PER_PIXEL);
   const [timeStartMs, setTimeStartMs] = useState<number>();
   const [followingLatest, setFollowingLatest] = useState(true);
+  const [valueViewport, setValueViewport] = useState<WaveValueViewport>({ center: DEFAULT_VALUE_CENTER, unitsPerPixel: DEFAULT_VALUE_UNITS_PER_PIXEL, initialized: false });
   const drag = useRef<{ startX: number; startY: number; originX: number; originY: number }>();
   const firstTimestamp = samples[0]?.timestampMs;
   const latestTimestamp = samples.at(-1)?.timestampMs ?? firstTimestamp;
+  const viewport = useMeasuredViewport(plot);
+  const chartHeight = Math.max(1, viewport.height - WAVE_TOOLBAR_HEIGHT);
+  const plotDimensions = useMemo(() => getWavePlotDimensions({ width: viewport.width, height: chartHeight }), [viewport.width, chartHeight]);
+  const timeWindowMs = timeScaleMsPerPixel * plotDimensions.width;
+  const valueRange = getVisibleValueRange(valueViewport, plotDimensions.height);
   // In follow mode, derive the window from the newest sample on every render;
   // this keeps incoming RX samples visible without waiting for another effect.
   const effectiveStart = followingLatest
     ? Math.max(firstTimestamp ?? 0, (latestTimestamp ?? 0) - timeWindowMs)
     : timeStartMs ?? Math.max(firstTimestamp ?? 0, (latestTimestamp ?? 0) - timeWindowMs);
-  const viewport = useMeasuredViewport(plot);
-  const chart = useMemo(() => buildWaveChart(samples, channels, { width: viewport.width, height: viewport.height - WAVE_TOOLBAR_HEIGHT, timeRange: { originMs: firstTimestamp ?? 0, startMs: effectiveStart, endMs: effectiveStart + timeWindowMs } }), [samples, channels, viewport.width, viewport.height, firstTimestamp, effectiveStart, timeWindowMs]);
+  const chart = useMemo(() => buildWaveChart(samples, channels, { width: viewport.width, height: chartHeight, timeRange: { originMs: firstTimestamp ?? 0, startMs: effectiveStart, endMs: effectiveStart + timeWindowMs }, valueRange }), [samples, channels, viewport.width, chartHeight, firstTimestamp, effectiveStart, timeWindowMs, valueRange]);
   const latestValues = useMemo(() => getLatestValues(samples), [samples]);
   const latestTimestampForView = samples.at(-1)?.timestampMs;
-  const updateTimeStart = (next: number) => {
+  useFollowedValueRange(samples, followingLatest, plotDimensions.height, setValueViewport);
+  const updateTimeStart = (next: number, windowMs = timeWindowMs) => {
     const minimumStart = firstTimestamp ?? next;
-    const maximumStart = Math.max(minimumStart, (latestTimestampForView ?? next) - timeWindowMs);
+    const maximumStart = Math.max(minimumStart, (latestTimestampForView ?? next) - windowMs);
     setTimeStartMs(Math.min(maximumStart, Math.max(minimumStart, next)));
   };
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -81,14 +90,16 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
     setFollowingLatest(false);
     setCrosshair(undefined);
     event.currentTarget.setPointerCapture(event.pointerId);
-    drag.current = { startX: event.clientX, startY: event.clientY, originX: effectiveStart, originY: 0 };
+    drag.current = { startX: event.clientX, startY: event.clientY, originX: effectiveStart, originY: valueViewport.center };
     setDragging(true);
   };
   const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     const currentDrag = drag.current;
     if (!currentDrag) return;
-    const elapsedDelta = -(event.clientX - currentDrag.startX) / Math.max(1, viewport.width - WAVE_AXIS_WIDTH) * timeWindowMs;
+    const elapsedDelta = -(event.clientX - currentDrag.startX) / chart.plotWidth * timeWindowMs;
     updateTimeStart(currentDrag.originX + elapsedDelta);
+    const valueDelta = (event.clientY - currentDrag.startY) * valueViewport.unitsPerPixel;
+    setValueViewport((current) => ({ ...current, center: currentDrag.originY + valueDelta }));
   };
   const handlePointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
@@ -99,21 +110,24 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
     event.preventDefault();
     if (event.ctrlKey) {
       const zoomStep = event.deltaY < 0 ? 1.2 : 1 / 1.2;
-      const nextWindow = clampTimeWindow(timeWindowMs / zoomStep);
-      const anchorRatio = event.nativeEvent.offsetX / Math.max(1, viewport.width - WAVE_AXIS_WIDTH);
+      const nextScale = clampTimeScale(timeScaleMsPerPixel / zoomStep);
+      const nextWindow = nextScale * chart.plotWidth;
+      const bounds = event.currentTarget.getBoundingClientRect();
+      const anchorRatio = clamp((event.clientX - bounds.left - chart.left) / chart.plotWidth, 0, 1);
       const anchorTime = effectiveStart + anchorRatio * timeWindowMs;
-      setTimeWindowMs(nextWindow);
-      setTimeStartMs(anchorTime - anchorRatio * nextWindow);
+      setFollowingLatest(false);
+      setTimeScaleMsPerPixel(nextScale);
+      updateTimeStart(anchorTime - anchorRatio * nextWindow, nextWindow);
       return;
     }
     setFollowingLatest(false);
     const horizontalDelta = event.shiftKey ? event.deltaY : event.deltaX || event.deltaY;
-    updateTimeStart(effectiveStart + horizontalDelta / Math.max(1, viewport.width - WAVE_AXIS_WIDTH) * timeWindowMs);
+    updateTimeStart(effectiveStart + horizontalDelta / chart.plotWidth * timeWindowMs);
   };
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (!event.ctrlKey || event.key !== "0") return;
     event.preventDefault();
-    setTimeWindowMs(10_000);
+    setTimeScaleMsPerPixel(DEFAULT_TIME_SCALE_MS_PER_PIXEL);
     setTimeStartMs(undefined);
     setFollowingLatest(false);
   };
@@ -130,7 +144,7 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
       <div className="wave-surface">
         <div className="wave-axis" aria-hidden="true">
           <div className="wave-axis-content" style={{ width: WAVE_AXIS_WIDTH, height: chart.viewportHeight }}>
-            <WaveYAxis chart={chart} height={viewport.height - WAVE_TOOLBAR_HEIGHT} />
+            <WaveYAxis chart={chart} />
           </div>
         </div>
         <div className={"wave-viewport " + (dragging ? "dragging" : "")} tabIndex={0} aria-label="波形绘图区，Ctrl 加滚轮缩放横轴，拖拽平移曲线" onKeyDown={handleKeyDown} onWheel={handleWheel} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} onMouseLeave={() => setCrosshair(undefined)}>
@@ -160,7 +174,7 @@ export function WaveformPanel({ samples, channels, connected, paused, onPause, o
       <WaveMetadata channelCount={chart.series.length} chart={chart} sampleCount={samples.length} />
       <WaveLegend chart={chart} />
       {saveError && <p className="wave-save-error" role="alert">保存失败：{saveError}</p>}
-      <div className="wave-footer"><span>数据源：RX 名称=数值帧</span><span>时间窗 {formatElapsedTime(timeWindowMs)} · 起点 {formatElapsedTime(effectiveStart - (firstTimestamp ?? effectiveStart))}</span></div>
+      <div className="wave-footer"><span>数据源：RX 名称=数值帧</span><span>时间比例 {formatElapsedTime(timeScaleMsPerPixel * 100)} / 100 px · 可视范围 {formatElapsedTime(timeWindowMs)}</span></div>
     </div>
   </section>;
 }
@@ -179,12 +193,9 @@ type SharedCrosshair = {
 
 type SharedCrosshairCandidate = Omit<SharedCrosshair, "originMs" | "left" | "top" | "plotWidth" | "plotHeight">;
 
-function WaveYAxis({ chart, height }: { chart: ReturnType<typeof buildWaveChart>; height: number }) {
+function WaveYAxis({ chart }: { chart: ReturnType<typeof buildWaveChart> }) {
   return <svg className="wave-axis-svg" width={WAVE_AXIS_WIDTH} height={chart.viewportHeight} viewBox={`0 0 ${WAVE_AXIS_WIDTH} ${chart.viewportHeight}`} preserveAspectRatio="none">
-    {chart.horizontalGrid.map((line, index) => {
-      const visibleY = chart.top + index / Math.max(1, chart.horizontalGrid.length - 1) * Math.max(1, height - chart.top - 64);
-      return <text key={"axis-" + index} x={WAVE_AXIS_WIDTH - 8} y={visibleY + 4} className="wave-label" textAnchor="end">{line.label}</text>;
-    })}
+    {chart.horizontalGrid.map((line, index) => <text key={"axis-" + index} x={WAVE_AXIS_WIDTH - 8} y={line.y + 4} className="wave-label" textAnchor="end">{line.label}</text>)}
   </svg>;
 }
 
@@ -341,8 +352,63 @@ function setViewportFromElement(element: HTMLDivElement, setViewport: Dispatch<S
   setViewport((current) => current.width === next.width && current.height === next.height ? current : next);
 }
 
-function clampTimeWindow(windowMs: number) {
-  return Math.min(MAX_TIME_WINDOW_MS, Math.max(MIN_TIME_WINDOW_MS, windowMs));
+type WaveValueViewport = {
+  center: number;
+  unitsPerPixel: number;
+  initialized: boolean;
+};
+
+function useFollowedValueRange(samples: WaveSample[], followingLatest: boolean, plotHeight: number, setValueViewport: Dispatch<SetStateAction<WaveValueViewport>>) {
+  const lastSampleKey = useRef<string>();
+  useEffect(() => {
+    const latest = samples.at(-1);
+    if (!latest) {
+      lastSampleKey.current = undefined;
+      return;
+    }
+    const sampleKey = `${latest.cursor}:${latest.timestampMs}`;
+    if (!followingLatest || lastSampleKey.current === sampleKey) return;
+    lastSampleKey.current = sampleKey;
+    setValueViewport((current) => extendValueViewport(current, samples, plotHeight));
+  }, [followingLatest, plotHeight, samples, setValueViewport]);
+}
+
+function getVisibleValueRange(viewport: WaveValueViewport, plotHeight: number) {
+  const halfSpan = viewport.unitsPerPixel * Math.max(1, plotHeight) / 2;
+  return { min: viewport.center - halfSpan, max: viewport.center + halfSpan };
+}
+
+function extendValueViewport(current: WaveValueViewport, samples: WaveSample[], plotHeight: number): WaveValueViewport {
+  const sampleRange = getSampleValueRange(samples);
+  if (!current.initialized) return createValueViewport(sampleRange, plotHeight);
+  const visibleRange = getVisibleValueRange(current, plotHeight);
+  if (sampleRange.min >= visibleRange.min && sampleRange.max <= visibleRange.max) return current;
+  return createValueViewport({ min: Math.min(visibleRange.min, sampleRange.min), max: Math.max(visibleRange.max, sampleRange.max) }, plotHeight, current.unitsPerPixel);
+}
+
+function getSampleValueRange(samples: WaveSample[]) {
+  const values = samples.map((sample) => sample.value);
+  const min = values.length > 0 ? Math.min(...values) : DEFAULT_VALUE_CENTER - 100;
+  const max = values.length > 0 ? Math.max(...values) : DEFAULT_VALUE_CENTER + 100;
+  const span = Math.max(max - min, 10);
+  return { min: min - span * 0.16, max: max + span * 0.16 };
+}
+
+function createValueViewport(range: { min: number; max: number }, plotHeight: number, minimumUnitsPerPixel = 0) {
+  const span = Math.max(10, range.max - range.min);
+  return {
+    center: (range.min + range.max) / 2,
+    unitsPerPixel: Math.max(minimumUnitsPerPixel, span / Math.max(1, plotHeight)),
+    initialized: true,
+  };
+}
+
+function clampTimeScale(millisecondsPerPixel: number) {
+  return clamp(millisecondsPerPixel, MIN_TIME_SCALE_MS_PER_PIXEL, MAX_TIME_SCALE_MS_PER_PIXEL);
+}
+
+function clamp(value: number, minimum: number, maximum: number) {
+  return Math.max(minimum, Math.min(value, maximum));
 }
 
 function useDismissableMenu(root: RefObject<HTMLDivElement>, openMenu: OpenMenu, dismiss: () => void) {
