@@ -124,33 +124,28 @@ export function McpDialog({ initialPage, theme, textCharset, sendShortcut, recei
             {error && <p className="settings-error" role="alert">{error}</p>}
             <section className="mcp-stdio-note"><h3>stdio</h3><p>由外部 MCP 客户端启动 `serialpilot-mcp`。协议消息使用 stdout，诊断日志只写入 stderr。</p></section>
           </section>}
-          {activePage === "about" && <section className="about-page"><div className="settings-section-title"><h2>SerialPilot</h2><p>跨平台桌面端 AI 串口助手。</p></div><dl className="about-details"><div><dt>版本</dt><dd>{APP_VERSION}</dd></div><div><dt>开发者</dt><dd>TONYGFX</dd></div><div><dt>许可证</dt><dd>MIT License</dd></div><div><dt>版权</dt><dd>Copyright (c) 2026 TONYGFX</dd></div><div><dt>GitHub</dt><dd><button type="button" className="about-link" onClick={() => void openUrl(PROJECT_GITHUB_URL)}>github.com/TONYGFX/SerialPilot</button></dd></div></dl><UpdateSettings autoCheck={autoUpdateCheck} status={updateStatus} onAutoCheckChange={onAutoUpdateCheckChange} onCheck={onCheckForUpdate} /></section>}
+          {activePage === "about" && <section className="about-page"><div className="settings-section-title"><h2>SerialPilot</h2><p>跨平台桌面端 AI 串口助手。</p></div><dl className="about-details"><VersionUpdateDetails autoCheck={autoUpdateCheck} status={updateStatus} onAutoCheckChange={onAutoUpdateCheckChange} onCheck={onCheckForUpdate} /><div><dt>开发者</dt><dd>TONYGFX</dd></div><div><dt>许可证</dt><dd>MIT License</dd></div><div><dt>版权</dt><dd>Copyright (c) 2026 TONYGFX</dd></div><div><dt>GitHub</dt><dd><button type="button" className="about-link" onClick={() => void openUrl(PROJECT_GITHUB_URL)}>github.com/TONYGFX/SerialPilot</button></dd></div></dl></section>}
         </div>
       </div>
     </section>
   </div>;
 }
 
-type UpdateSettingsProps = {
+type VersionUpdateDetailsProps = {
   autoCheck: boolean;
   status: UpdateCheckStatus;
   onAutoCheckChange: (enabled: boolean) => void;
   onCheck: () => void;
 };
 
-/** Renders the local update notification policy and manual release lookup. */
-function UpdateSettings({ autoCheck, status, onAutoCheckChange, onCheck }: UpdateSettingsProps) {
+/** Renders update controls as rows in the About version details. */
+function VersionUpdateDetails({ autoCheck, status, onAutoCheckChange, onCheck }: VersionUpdateDetailsProps) {
   const checking = status.state === "checking";
   const message = updateMessage(status);
   const releaseUrl = status.state === "available" ? status.release.releaseUrl : undefined;
   const releaseVersion = status.state === "available" ? status.release.version : undefined;
 
-  return <section className="update-settings">
-    <div className="settings-section-title"><h2>软件更新</h2><p>通过公开 GitHub Releases 检查新版本；检查只提示更新，不会自动下载或安装。</p></div>
-    <label className="check"><input type="checkbox" checked={autoCheck} onChange={(event) => onAutoCheckChange(event.target.checked)} />启动时自动检查更新</label>
-    <div className="update-actions"><button type="button" className="secondary" disabled={checking} onClick={onCheck}>{checking ? "正在检查" : "检查更新"}</button>{releaseUrl && releaseVersion && <button type="button" className="primary update-release-link" onClick={() => void openUrl(releaseUrl)}>查看 v{releaseVersion}</button>}</div>
-    <p className={`update-status ${status.state}`} role={status.state === "failed" ? "alert" : "status"}>{message}</p>
-  </section>;
+  return <><div><dt>版本</dt><dd className="about-version"><span>{APP_VERSION}</span><button type="button" className="secondary about-check-button" disabled={checking} onClick={onCheck}>{checking ? "正在检查" : "检查更新"}</button></dd></div><div><dt>更新</dt><dd className={`about-update-status ${status.state}`} role={status.state === "failed" ? "alert" : "status"}><span>{message}</span>{releaseUrl && releaseVersion && <button type="button" className="about-link" onClick={() => void openUrl(releaseUrl)}>查看 v{releaseVersion}</button>}</dd></div><div><dt>检查</dt><dd><label className="check about-auto-check"><input type="checkbox" checked={autoCheck} onChange={(event) => onAutoCheckChange(event.target.checked)} />启动时自动检查更新</label></dd></div></>;
 }
 
 function updateMessage(status: UpdateCheckStatus): string {
