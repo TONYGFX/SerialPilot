@@ -304,20 +304,25 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .file-number { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 5px; color: #718189; font-size: 9px; white-space: nowrap; }
 .file-send { justify-self: end; width: auto; min-width: 92px; padding: 0 11px; white-space: nowrap; }
 .file-progress { display: grid; gap: 6px; min-width: 0; padding: 9px; border: 1px solid #35434a; background: #141d21; }
+.file-progress-list { display: grid; gap: 6px; max-height: 220px; min-width: 0; overflow-y: auto; padding-right: 2px; }
 .file-progress-head, .file-progress-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
 .file-progress-head { color: #8fa0a5; font-size: 10px; }
 .file-progress-head strong { color: #b8d5c0; font: 10px var(--serial-mono-font); }
 .file-progress-line { min-height: 20px; }
-.file-progress-line small { overflow: hidden; color: #91a0a6; font: 9px var(--serial-mono-font); text-overflow: ellipsis; white-space: nowrap; }
+.file-progress-line small { min-width: 0; flex: 1 1 auto; overflow: hidden; color: #91a0a6; font: 9px var(--serial-mono-font); text-overflow: ellipsis; white-space: nowrap; }
 .file-progress-bar { position: relative; height: 4px; overflow: hidden; background: #263339; }
 .file-progress-bar span { position: absolute; inset: 0 auto 0 0; background: #50b977; }
 .file-progress-bar.indeterminate span { animation: receive-progress 1.1s ease-in-out infinite alternate; }
 @keyframes receive-progress { from { transform: translateX(-35%); } to { transform: translateX(190%); } }
 .file-progress-line strong { order: 2; min-width: 38px; color: #9eb0b4; font: 9px var(--serial-mono-font); text-align: right; }
+.file-progress-line > button { flex: 0 0 auto; white-space: nowrap; }
+.file-progress-actions { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; }
 .file-cancel { order: 3; min-height: 21px; padding: 0 7px; border: 1px solid #70423f; border-radius: 2px; background: #291d1d; color: #d9958d; font-size: 9px; }
 .file-cancel:hover { border-color: #b6534d; background: #3a2321; color: #fff; }
 .file-dismiss { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 21px; padding: 0 7px; border: 1px solid #40535a; border-radius: 2px; background: #202b30; color: #b4c4c7; font-size: 9px; }
 .file-dismiss:hover { border-color: #668087; background: #2a383e; color: #fff; }
+.file-open { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 21px; padding: 0 7px; border: 1px solid #3e7656; border-radius: 2px; background: #1d3027; color: #a8d7b8; font-size: 9px; white-space: nowrap; }
+.file-open:hover { border-color: #5db37a; background: #254a35; color: #e7fff0; }
 .file-dismiss-countdown { display: inline-grid; width: 13px; height: 13px; place-items: center; border-radius: 50%; background: #455b63; color: #eef5f6; font: 8px var(--serial-mono-font); }
 .file-picker-error { overflow: hidden; color: #d9958d; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .receive-directory-title { margin-top: 20px; }
@@ -546,6 +551,8 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .app-shell[data-theme="light"] .file-cancel:hover { border-color: #b6534d; background: #fbe0dc; color: #842d27; }
 .app-shell[data-theme="light"] .file-dismiss { border-color: #bdcbcf; background: #f6f9fa; color: #526b72; }
 .app-shell[data-theme="light"] .file-dismiss:hover { border-color: #91a8ae; background: #edf3f4; color: #314d55; }
+.app-shell[data-theme="light"] .file-open { border-color: #8fc0a1; background: #edf8f0; color: #276c42; }
+.app-shell[data-theme="light"] .file-open:hover { border-color: #4f9e69; background: #dff2e5; color: #1b5c35; }
 .app-shell[data-theme="light"] .file-dismiss-countdown { background: #718990; color: #fff; }
 .app-shell[data-theme="light"] .receive-directory code { border-color: #bdcbcf; background: #f7fafb; color: #587078; }
 .app-shell[data-theme="light"] .receive-display-picker { border-color: #bdcbcf; }

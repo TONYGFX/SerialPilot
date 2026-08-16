@@ -32,3 +32,8 @@ export async function configureMcpHttp(config: McpHttpPreferences): Promise<McpH
 export async function saveTextFile(path: string, content: string): Promise<void> {
   await invoke("save_text_file", { path, content });
 }
+
+/** Opens the native file manager with a completed receive selected. */
+export async function revealFile(path: string): Promise<void> {
+  await invoke("reveal_file", { path });
+}

@@ -51,6 +51,38 @@ fn save_text_file(path: String, content: String) -> Result<(), String> {
         .map_err(|error| format!("写入文件失败：{}", error))
 }
 
+#[tauri::command]
+fn reveal_file(path: String) -> Result<(), String> {
+    let file_path = PathBuf::from(path.trim());
+    if !file_path.is_file() {
+        return Err("接收文件不存在或已被移动".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = std::process::Command::new("explorer.exe");
+        command.arg(format!("/select,{}", file_path.display()));
+        command
+    };
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = std::process::Command::new("open");
+        command.args(["-R", &file_path.to_string_lossy()]);
+        command
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = {
+        let mut command = std::process::Command::new("xdg-open");
+        command.arg(file_path.parent().unwrap_or(file_path.as_path()));
+        command
+    };
+
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("无法打开文件所在目录：{error}"))
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -71,7 +103,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             execute_serial,
             configure_mcp_http,
-            save_text_file
+            save_text_file,
+            reveal_file
         ])
         .run(tauri::generate_context!())
         .expect("failed to run SerialPilot");
