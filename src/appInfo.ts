@@ -10,11 +10,18 @@ export const APP_VERSION = "0.1.2";
 /** Public project home page opened from the About settings page. */
 export const PROJECT_GITHUB_URL = "https://github.com/TONYGFX/SerialPilot";
 
-/** Public release list used when an update is available. */
+/** Public release list for the SerialPilot project. */
 export const PROJECT_RELEASES_URL = `${PROJECT_GITHUB_URL}/releases`;
 
-/** GitHub's redirect to the currently newest public release page. */
-export const PROJECT_LATEST_RELEASE_URL = `${PROJECT_RELEASES_URL}/latest`;
+/**
+ * Creates the public GitHub Release URL for an exact mirrored release tag.
+ *
+ * @param releaseTag Tag returned by the Gitea or GitHub Release API.
+ * @returns GitHub page for the corresponding published release.
+ */
+export function projectReleaseUrl(releaseTag: string): string {
+  return `${PROJECT_RELEASES_URL}/tag/${encodeURIComponent(releaseTag)}`;
+}
 
 /** Primary public Gitea release endpoint for clients that cannot reach GitHub reliably. */
 export const GITEA_LATEST_RELEASE_API_URL = "https://git.tonygfx.cn/api/v1/repos/tonygfx/SerialPilot/releases/latest";

@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { GITEA_LATEST_RELEASE_API_URL, GITHUB_LATEST_RELEASE_API_URL, PROJECT_LATEST_RELEASE_URL } from "../appInfo";
+import { GITEA_LATEST_RELEASE_API_URL, GITHUB_LATEST_RELEASE_API_URL, projectReleaseUrl } from "../appInfo";
 import { checkForUpdate, compareVersions, type ReleaseFetcher } from "./updateChecker";
 
 function releaseFetcher(body: unknown): ReleaseFetcher {
@@ -15,7 +15,7 @@ function releaseFetcher(body: unknown): ReleaseFetcher {
 describe("updateChecker", () => {
   it("recognizes a newer v-prefixed stable release", async () => {
     const result = await checkForUpdate("0.1.2", releaseFetcher({ tag_name: "v0.2.0", html_url: "https://example.test/release" }));
-    expect(result).toEqual({ available: true, release: { version: "0.2.0", releaseUrl: PROJECT_LATEST_RELEASE_URL, publishedAt: undefined } });
+    expect(result).toEqual({ available: true, release: { version: "0.2.0", releaseUrl: projectReleaseUrl("v0.2.0"), publishedAt: undefined } });
   });
 
   it("does not offer the running release as an update", async () => {

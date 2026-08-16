@@ -367,12 +367,9 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .about-details dd { color: #c9d8d4; font-family: var(--serial-mono-font); }
 .about-link { overflow: hidden; border: 0; padding: 0; background: transparent; color: #71c991; cursor: pointer; font: inherit; text-align: left; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
 .about-link:hover { color: #b9e8c7; text-decoration: underline; }
-.about-version, .about-update-status { justify-content: space-between; gap: 8px; min-width: 0; }
+.about-version { justify-content: space-between; gap: 8px; min-width: 0; }
 .about-check-button { flex: 0 0 auto; min-height: 24px; padding: 0 8px; white-space: nowrap; }
-.about-update-status > span { min-width: 0; overflow: hidden; color: #839398; text-overflow: ellipsis; white-space: nowrap; }
-.about-update-status.available > span { color: #82d39a; }
-.about-update-status.failed > span { color: #d9958d; }
-.about-auto-check { margin: 0; color: #c9d8d4; font: 10px var(--ui-font); white-space: nowrap; }
+.about-release-version { flex: 0 0 auto; }
 .settings-section-title { margin-bottom: 18px; }
 .settings-section-title h2 { margin-bottom: 6px; font-size: 13px; }
 .settings-section-title p, .settings-note { margin: 0; color: #718189; font-size: 10px; line-height: 1.55; }
@@ -512,10 +509,6 @@ textarea { display: block; width: 100%; min-height: 0; height: auto; resize: non
 .app-shell[data-theme="light"] .about-details dd { color: #203b32; }
 .app-shell[data-theme="light"] .about-link { color: #237247; }
 .app-shell[data-theme="light"] .about-link:hover { color: #155b35; }
-.app-shell[data-theme="light"] .about-update-status > span { color: #687f86; }
-.app-shell[data-theme="light"] .about-update-status.available > span { color: #237247; }
-.app-shell[data-theme="light"] .about-update-status.failed > span { color: #9d3e36; }
-.app-shell[data-theme="light"] .about-auto-check { color: #203b32; }
 .app-shell[data-theme="light"] .view-tabs button { border-color: #d7e0e2; color: #65787e; }
 .app-shell[data-theme="light"] .view-tabs button.selected { color: #1f6b41; background: #eef8f1; box-shadow: inset 0 -2px #3ca866; }
 .app-shell[data-theme="light"] .error { border-color: #d86b60; color: #8f2f28; background: #fff0ee; }

@@ -56,10 +56,10 @@ export function App() {
     }
   }, []);
   useEffect(() => {
-    if (!preferences.updates.autoCheck || !shouldCheckForUpdate(preferences.updates.lastCheckedAt)) return;
+    if (!shouldCheckForUpdate(preferences.updates.lastCheckedAt)) return;
     const timer = window.setTimeout(() => void checkAppUpdate(), 1800);
     return () => window.clearTimeout(timer);
-  }, [checkAppUpdate, preferences.updates.autoCheck, preferences.updates.lastCheckedAt]);
+  }, [checkAppUpdate, preferences.updates.lastCheckedAt]);
   useEffect(() => {
     if (!preferences.mcpHttp.enabled) return;
     void configureMcpHttp(preferences.mcpHttp).then(setMcpStatus).catch(() => undefined);
@@ -83,7 +83,7 @@ export function App() {
         {view === "terminal" ? <TerminalPanel activity={activity} status={serial.status} paused={serial.paused} textCharset={preferences.textCharset} sendShortcut={preferences.keyboard.sendShortcut} encoding={serial.encoding} payload={serial.payload} canSend={canSend} fileTransferActive={serial.fileTransferActive} onPause={serial.togglePaused} onClear={serial.clearFrames} onSave={serial.saveFrames} onEncoding={serial.setEncoding} onPayload={(value) => { serial.setPayload(value); if (value !== serial.filePath) serial.setFilePath(""); }} onSend={serial.send} /> : <WaveformPanel samples={serial.waveSamples} channels={serial.waveChannels} connected={serial.status.connected} paused={serial.waveformPaused} onPause={serial.toggleWaveformPaused} onClear={serial.clearWaveform} onChannelsChange={serial.setWaveChannels} />}
       </div>
     </div>
-    {settingsOpen && <McpDialog initialPage={settingsPage} theme={preferences.theme} textCharset={preferences.textCharset} sendShortcut={preferences.keyboard.sendShortcut} receiveDirectory={preferences.receiveDirectory} autoUpdateCheck={preferences.updates.autoCheck} updateStatus={updateStatus} onThemeChange={(theme) => setPreferences((current) => ({ ...current, theme }))} onTextCharsetChange={(textCharset) => setPreferences((current) => ({ ...current, textCharset }))} onSendShortcutChange={(sendShortcut) => setPreferences((current) => ({ ...current, keyboard: { ...current.keyboard, sendShortcut } }))} onReceiveDirectoryChange={(receiveDirectory) => setPreferences((current) => ({ ...current, receiveDirectory }))} onAutoUpdateCheckChange={(autoCheck) => setPreferences((current) => ({ ...current, updates: { ...current.updates, autoCheck } }))} onCheckForUpdate={() => void checkAppUpdate()} preferences={preferences.mcpHttp} runtimeStatus={mcpStatus} onChange={(mcpHttp) => setPreferences((current) => ({ ...current, mcpHttp }))} onApply={applyMcp} onClose={() => setSettingsOpen(false)} />}
+    {settingsOpen && <McpDialog initialPage={settingsPage} theme={preferences.theme} textCharset={preferences.textCharset} sendShortcut={preferences.keyboard.sendShortcut} receiveDirectory={preferences.receiveDirectory} updateStatus={updateStatus} onThemeChange={(theme) => setPreferences((current) => ({ ...current, theme }))} onTextCharsetChange={(textCharset) => setPreferences((current) => ({ ...current, textCharset }))} onSendShortcutChange={(sendShortcut) => setPreferences((current) => ({ ...current, keyboard: { ...current.keyboard, sendShortcut } }))} onReceiveDirectoryChange={(receiveDirectory) => setPreferences((current) => ({ ...current, receiveDirectory }))} onCheckForUpdate={() => void checkAppUpdate()} preferences={preferences.mcpHttp} runtimeStatus={mcpStatus} onChange={(mcpHttp) => setPreferences((current) => ({ ...current, mcpHttp }))} onApply={applyMcp} onClose={() => setSettingsOpen(false)} />}
   </main>;
 }
 
@@ -112,7 +112,6 @@ function readPreferences(): ApplicationPreferences {
         port: typeof port === "number" && Number.isInteger(port) && port >= 1024 && port <= 65535 ? port : 3030,
       },
       updates: {
-        autoCheck: candidate.updates?.autoCheck !== false,
         lastCheckedAt: isValidTimestamp(candidate.updates?.lastCheckedAt) ? candidate.updates?.lastCheckedAt : undefined,
       },
     };

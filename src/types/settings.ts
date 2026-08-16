@@ -27,7 +27,6 @@ export type McpHttpStatus = {
 };
 
 export type UpdatePreferences = {
-  autoCheck: boolean;
   lastCheckedAt?: string;
 };
 
@@ -46,5 +45,5 @@ export const DEFAULT_APPLICATION_PREFERENCES: ApplicationPreferences = {
   keyboard: { sendShortcut: "ctrl-enter" },
   receiveDirectory: "",
   mcpHttp: { enabled: false, port: 3030 },
-  updates: { autoCheck: true },
+  updates: {},
 };

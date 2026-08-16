@@ -21,13 +21,11 @@ type McpDialogProps = {
   textCharset: TextCharset;
   sendShortcut: SendShortcut;
   receiveDirectory: string;
-  autoUpdateCheck: boolean;
   updateStatus: UpdateCheckStatus;
   onThemeChange: (theme: Theme) => void;
   onTextCharsetChange: (charset: TextCharset) => void;
   onSendShortcutChange: (shortcut: SendShortcut) => void;
   onReceiveDirectoryChange: (directory: string) => void;
-  onAutoUpdateCheckChange: (enabled: boolean) => void;
   onCheckForUpdate: () => void;
   preferences: McpHttpPreferences;
   runtimeStatus: McpHttpStatus;
@@ -49,7 +47,7 @@ const SEND_SHORTCUTS: SelectOption[] = [
 ];
 
 /** Renders application settings, including MCP transport controls. */
-export function McpDialog({ initialPage, theme, textCharset, sendShortcut, receiveDirectory, autoUpdateCheck, updateStatus, onThemeChange, onTextCharsetChange, onSendShortcutChange, onReceiveDirectoryChange, onAutoUpdateCheckChange, onCheckForUpdate, preferences, runtimeStatus, onChange, onApply, onClose }: McpDialogProps) {
+export function McpDialog({ initialPage, theme, textCharset, sendShortcut, receiveDirectory, updateStatus, onThemeChange, onTextCharsetChange, onSendShortcutChange, onReceiveDirectoryChange, onCheckForUpdate, preferences, runtimeStatus, onChange, onApply, onClose }: McpDialogProps) {
   const [activePage, setActivePage] = useState<SettingsPage>(initialPage);
   const [error, setError] = useState<string>();
   const [isApplying, setIsApplying] = useState(false);
@@ -124,7 +122,7 @@ export function McpDialog({ initialPage, theme, textCharset, sendShortcut, recei
             {error && <p className="settings-error" role="alert">{error}</p>}
             <section className="mcp-stdio-note"><h3>stdio</h3><p>由外部 MCP 客户端启动 `serialpilot-mcp`。协议消息使用 stdout，诊断日志只写入 stderr。</p></section>
           </section>}
-          {activePage === "about" && <section className="about-page"><div className="settings-section-title"><h2>SerialPilot</h2><p>跨平台桌面端 AI 串口助手。</p></div><dl className="about-details"><VersionUpdateDetails autoCheck={autoUpdateCheck} status={updateStatus} onAutoCheckChange={onAutoUpdateCheckChange} onCheck={onCheckForUpdate} /><div><dt>开发者</dt><dd>TONYGFX</dd></div><div><dt>许可证</dt><dd>MIT License</dd></div><div><dt>版权</dt><dd>Copyright (c) 2026 TONYGFX</dd></div><div><dt>GitHub</dt><dd><button type="button" className="about-link" onClick={() => void openUrl(PROJECT_GITHUB_URL)}>github.com/TONYGFX/SerialPilot</button></dd></div></dl></section>}
+          {activePage === "about" && <section className="about-page"><div className="settings-section-title"><h2>SerialPilot</h2><p>跨平台桌面端 AI 串口助手。</p></div><dl className="about-details"><VersionUpdateDetails status={updateStatus} onCheck={onCheckForUpdate} /><div><dt>开发者</dt><dd>TONYGFX</dd></div><div><dt>许可证</dt><dd>MIT License</dd></div><div><dt>版权</dt><dd>Copyright (c) 2026 TONYGFX</dd></div><div><dt>GitHub</dt><dd><button type="button" className="about-link" onClick={() => void openUrl(PROJECT_GITHUB_URL)}>github.com/TONYGFX/SerialPilot</button></dd></div></dl></section>}
         </div>
       </div>
     </section>
@@ -132,26 +130,14 @@ export function McpDialog({ initialPage, theme, textCharset, sendShortcut, recei
 }
 
 type VersionUpdateDetailsProps = {
-  autoCheck: boolean;
   status: UpdateCheckStatus;
-  onAutoCheckChange: (enabled: boolean) => void;
   onCheck: () => void;
 };
 
 /** Renders update controls as rows in the About version details. */
-function VersionUpdateDetails({ autoCheck, status, onAutoCheckChange, onCheck }: VersionUpdateDetailsProps) {
+function VersionUpdateDetails({ status, onCheck }: VersionUpdateDetailsProps) {
   const checking = status.state === "checking";
-  const message = updateMessage(status);
-  const releaseUrl = status.state === "available" ? status.release.releaseUrl : undefined;
-  const releaseVersion = status.state === "available" ? status.release.version : undefined;
+  const checkedRelease = status.state === "available" || status.state === "up-to-date" ? status.release : undefined;
 
-  return <><div><dt>版本</dt><dd className="about-version"><span>{APP_VERSION}</span><button type="button" className="secondary about-check-button" disabled={checking} onClick={onCheck}>{checking ? "正在检查" : "检查更新"}</button></dd></div><div><dt>更新</dt><dd className={`about-update-status ${status.state}`} role={status.state === "failed" ? "alert" : "status"}><span>{message}</span>{releaseUrl && releaseVersion && <button type="button" className="about-link" onClick={() => void openUrl(releaseUrl)}>查看 v{releaseVersion}</button>}</dd></div><div><dt>检查</dt><dd><label className="check about-auto-check"><input type="checkbox" checked={autoCheck} onChange={(event) => onAutoCheckChange(event.target.checked)} />启动时通过 Gitea 检查，GitHub 兜底</label></dd></div></>;
-}
-
-function updateMessage(status: UpdateCheckStatus): string {
-  if (status.state === "checking") return "正在检查公开发布版本。";
-  if (status.state === "available") return `发现新版本 v${status.release.version}。`;
-  if (status.state === "up-to-date") return "当前已是最新版本。";
-  if (status.state === "failed") return "无法检查更新，请确认网络后重试。";
-  return "尚未检查更新。";
+  return <div><dt>版本</dt><dd className="about-version"><span>{APP_VERSION}</span>{checkedRelease ? <button type="button" className="about-link about-release-version" title={`在 GitHub 查看 v${checkedRelease.version}`} onClick={() => void openUrl(checkedRelease.releaseUrl)}>v{checkedRelease.version}</button> : <button type="button" className="secondary about-check-button" disabled={checking} onClick={onCheck}>{checking ? "正在检查" : "检查更新"}</button>}</dd></div>;
 }

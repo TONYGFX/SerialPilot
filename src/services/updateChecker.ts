@@ -4,7 +4,7 @@
  * deliberately excluded because it is not a release manifest for end users.
  */
 
-import { LATEST_RELEASE_API_URLS, PROJECT_LATEST_RELEASE_URL } from "../appInfo";
+import { LATEST_RELEASE_API_URLS, projectReleaseUrl } from "../appInfo";
 
 export type ReleaseInfo = {
   version: string;
@@ -93,7 +93,7 @@ function parseRelease(value: unknown): ReleaseInfo {
   return {
     version,
     // Gitea identifies the available version, while the update action always opens GitHub.
-    releaseUrl: PROJECT_LATEST_RELEASE_URL,
+    releaseUrl: projectReleaseUrl(value.tag_name),
     publishedAt: typeof value.published_at === "string" ? value.published_at : undefined,
   };
 }
