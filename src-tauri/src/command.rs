@@ -1610,27 +1610,14 @@ async fn stream_file(
                 timeout_ms,
             )
             .await?;
-            let header_ack = wait_for_control(
+            if wait_for_control_sequence(
                 state,
                 changed,
                 cancel,
                 action_id,
                 before,
                 timeout_ms,
-                &[0x06],
-            )
-            .await;
-            let Some((header_ack_cursor, _)) = header_ack else {
-                return Err((0, cancellation_requested(cancel, action_id).await));
-            };
-            if wait_for_control(
-                state,
-                changed,
-                cancel,
-                action_id,
-                header_ack_cursor,
-                timeout_ms,
-                &[0x43],
+                &[XMODEM_ACK, XMODEM_CRC_REQUEST],
             )
             .await
             .is_none()
@@ -2394,6 +2381,62 @@ async fn wait_for_control(
     }
 }
 
+/// Waits for an ordered control-byte sequence without advancing past bytes in
+/// the same RX frame. Physical serial reads can coalesce adjacent control
+/// bytes, such as Ymodem's header ACK followed immediately by its CRC request.
+async fn wait_for_control_sequence(
+    state: &Arc<Mutex<State>>,
+    changed: &Arc<Notify>,
+    cancel: &Arc<Mutex<Option<String>>>,
+    action_id: &str,
+    after_cursor: u64,
+    timeout_ms: u64,
+    expected: &[u8],
+) -> Option<u64> {
+    if expected.is_empty() {
+        return Some(after_cursor);
+    }
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
+    let mut cursor = after_cursor;
+    let mut matched = 0usize;
+    loop {
+        if cancellation_requested(cancel, action_id).await {
+            return None;
+        }
+        let notified = changed.notified();
+        tokio::pin!(notified);
+        let snapshot = state.lock().await;
+        let frames: Vec<_> = snapshot
+            .frames
+            .iter()
+            .filter(|frame| frame.cursor > cursor && frame.direction == Direction::Rx)
+            .cloned()
+            .collect();
+        drop(snapshot);
+        for frame in frames {
+            if let Ok(bytes) = BASE64.decode(&frame.raw_base64) {
+                for byte in bytes {
+                    matched = if byte == expected[matched] {
+                        matched + 1
+                    } else if byte == expected[0] {
+                        1
+                    } else {
+                        0
+                    };
+                    if matched == expected.len() {
+                        return Some(frame.cursor);
+                    }
+                }
+            }
+            cursor = frame.cursor;
+        }
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() || timeout(remaining, &mut notified).await.is_err() {
+            return None;
+        }
+    }
+}
+
 async fn cancellation_requested(cancel: &Arc<Mutex<Option<String>>>, action_id: &str) -> bool {
     cancel.lock().await.as_deref() == Some(action_id)
 }
@@ -2726,6 +2769,31 @@ mod tests {
         };
         assert_eq!(first.frames.len(), 2);
         assert!(second.frames.is_empty());
+    }
+
+    #[tokio::test]
+    async fn ymodem_header_confirmation_accepts_coalesced_controls() {
+        let core = core();
+        append_frame(
+            &core.state,
+            Direction::Rx,
+            vec![XMODEM_ACK, XMODEM_CRC_REQUEST],
+        )
+        .await;
+        let cancel = Arc::new(Mutex::new(None));
+
+        let cursor = wait_for_control_sequence(
+            &core.state,
+            &core.changed,
+            &cancel,
+            "ymodem-header-test",
+            0,
+            50,
+            &[XMODEM_ACK, XMODEM_CRC_REQUEST],
+        )
+        .await;
+
+        assert_eq!(cursor, Some(1));
     }
 
     #[tokio::test]
