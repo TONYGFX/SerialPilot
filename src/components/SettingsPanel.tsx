@@ -90,17 +90,17 @@ function FileTransferSettings({ connected, fileProtocol, fileProgress, fileRecei
 function FileTransferProgress({ progress, onCancel, onDismiss }: { progress: FileSendProgress; onCancel: () => Promise<void>; onDismiss: () => void }) {
   const [dismissSeconds, setDismissSeconds] = useState(5);
   useEffect(() => {
-    if (!progress.completed) return;
+    if (!(progress.completed || progress.cancelled || progress.failed)) return;
     setDismissSeconds(5);
     const countdown = window.setInterval(() => {
       setDismissSeconds((current) => Math.max(0, current - 1));
     }, 1_000);
     return () => window.clearInterval(countdown);
-  }, [progress.action_id, progress.completed]);
+  }, [progress.action_id, progress.completed, progress.cancelled, progress.failed]);
   const percent = progress.file_size === 0 ? 100 : Math.min(100, Math.round((progress.sent_bytes / progress.file_size) * 100));
-  const state = progress.cancelled ? "已取消" : progress.completed ? "传输完成" : "正在发送";
-  const finished = progress.completed || progress.cancelled;
-  return <div className="file-progress" aria-live="polite"><div className="file-progress-head"><span>{state}</span><strong>{percent}%</strong></div><div className="file-progress-bar" role="progressbar" aria-label="文件发送进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}><span style={{ width: `${percent}%` }} /></div><div className="file-progress-line"><small>{formatTransferBytes(progress.sent_bytes)} / {formatTransferBytes(progress.file_size)}</small>{finished ? <button type="button" className="file-dismiss" onClick={onDismiss} title="关闭文件发送状态"><Icon name="close" size={12} />关闭{progress.completed && <span className="file-dismiss-countdown" aria-label={`${dismissSeconds} 秒后自动关闭`}>{dismissSeconds}</span>}</button> : <button type="button" className="file-cancel" onClick={() => void onCancel()}>取消</button>}</div></div>;
+  const state = progress.failed ? "发送失败" : progress.cancelled ? "已取消" : progress.completed ? "传输完成" : "正在发送";
+  const finished = progress.completed || progress.cancelled || progress.failed;
+  return <div className="file-progress" aria-live="polite"><div className="file-progress-head"><span>{state}</span><strong>{percent}%</strong></div><div className="file-progress-bar" role="progressbar" aria-label="文件发送进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}><span style={{ width: `${percent}%` }} /></div><div className="file-progress-line"><small>{formatTransferBytes(progress.sent_bytes)} / {formatTransferBytes(progress.file_size)}</small>{finished ? <button type="button" className="file-dismiss" onClick={onDismiss} title="关闭文件发送状态"><Icon name="close" size={12} />关闭{(progress.completed || progress.failed) && <span className="file-dismiss-countdown" aria-label={`${dismissSeconds} 秒后自动关闭`}>{dismissSeconds}</span>}</button> : <button type="button" className="file-cancel" onClick={() => void onCancel()}>取消</button>}</div>{progress.failed && progress.message && <small className="file-picker-error" role="alert">{progress.message}</small>}</div>;
 }
 
 function FileReceiveProgressCard({ progress, onCancel, onDismiss }: { progress: FileReceiveProgress; onCancel: () => Promise<void>; onDismiss: () => void }) {

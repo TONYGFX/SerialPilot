@@ -488,6 +488,10 @@ pub struct FileProgress {
     pub chunk_size: usize,
     pub completed: bool,
     pub cancelled: bool,
+    #[serde(default)]
+    pub failed: bool,
+    #[serde(default)]
+    pub message: Option<String>,
 }
 
 /// Immutable progress event emitted by the Rust-owned file receiver.
@@ -1198,7 +1202,7 @@ impl SerialCore {
         let file_task = self.file_task.clone();
         let file_path_for_event = file_path.clone();
         let action_for_task = action_id.clone();
-        let timeout_ms = timeout_ms.unwrap_or(1_000);
+        let timeout_ms = timeout_ms.unwrap_or(10_000).clamp(1_000, 60_000);
         let task = tokio::spawn(async move {
             let result = stream_file(
                 &file_path,
@@ -1232,6 +1236,8 @@ impl SerialCore {
                         chunk_size,
                         completed: false,
                         cancelled,
+                        failed: !cancelled,
+                        message: (!cancelled).then(|| "等待对端握手或传输确认超时".to_string()),
                     },
                 );
             }
@@ -1269,6 +1275,8 @@ impl SerialCore {
                 chunk_size: 0,
                 completed: false,
                 cancelled: true,
+                failed: false,
+                message: None,
             })
             .unwrap_or_default(),
         );
@@ -1694,6 +1702,8 @@ async fn stream_file(
                 chunk_size,
                 completed: false,
                 cancelled: false,
+                failed: false,
+                message: None,
             },
         );
         if interval_ms > 0
@@ -1741,6 +1751,8 @@ async fn stream_file(
             chunk_size,
             completed: true,
             cancelled: false,
+            failed: false,
+            message: None,
         },
     );
     Ok(sent_bytes)
@@ -1797,6 +1809,8 @@ async fn receive_file_stream(
 
     let mut parser = Vec::new();
     let mut next_cursor = cursor;
+    let handshake_deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
+    let mut waiting_for_first_packet = true;
     let mut expected_sequence: u8 = if protocol == FileTransferProtocol::Ymodem {
         0
     } else {
@@ -1813,15 +1827,45 @@ async fn receive_file_stream(
             cleanup_partial_file(part_path.as_deref()).await;
             return receive_cancelled(progress);
         }
+        let wait_timeout = if waiting_for_first_packet {
+            let remaining =
+                handshake_deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                cleanup_partial_file(part_path.as_deref()).await;
+                return receive_failed(progress, "等待发送端数据超时");
+            }
+            remaining.min(Duration::from_secs(1)).as_millis().max(1) as u64
+        } else {
+            timeout_ms
+        };
         let Some((frame_cursor, bytes)) =
-            wait_for_rx_bytes(state, changed, cancel, action_id, next_cursor, timeout_ms).await
+            wait_for_rx_bytes(state, changed, cancel, action_id, next_cursor, wait_timeout).await
         else {
+            if waiting_for_first_packet {
+                if send_receive_control(
+                    XMODEM_CRC_REQUEST,
+                    &outgoing,
+                    state,
+                    events,
+                    audit,
+                    changed,
+                    timeout_ms,
+                )
+                .await
+                .is_err()
+                {
+                    cleanup_partial_file(part_path.as_deref()).await;
+                    return receive_failed(progress, "无法重发接收握手");
+                }
+                continue;
+            }
             cleanup_partial_file(part_path.as_deref()).await;
             return receive_failed(progress, "等待发送端数据超时");
         };
         next_cursor = frame_cursor;
         parser.extend(bytes);
         while let Some(packet) = take_received_packet(&mut parser) {
+            waiting_for_first_packet = false;
             match packet {
                 ReceivedPacket::Invalid => {
                     invalid_packets += 1;

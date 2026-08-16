@@ -46,6 +46,8 @@ export type FileSendProgress = {
   chunk_size: number;
   completed: boolean;
   cancelled: boolean;
+  failed?: boolean;
+  message?: string | null;
 };
 
 /** Progress emitted by the Rust-owned X/Ymodem file receiver. */
